@@ -1,0 +1,222 @@
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+using SilentSprint.UI;
+using System;
+using DG.Tweening;
+
+namespace SilentSprint.Gameplay
+{
+    [RequireComponent(typeof(CharacterController))]
+    public class PlayerController : MonoBehaviour
+    {
+        [Header("Movement Settings")]
+        public float walkSpeed = 5.0f;
+        public float runSpeed = 8.0f;
+        public float jumpHeight = 1.5f;
+        public float gravity = -9.81f;
+        public Joystick movementJoystick;
+
+        [Header("Camera Settings")]
+        public float mouseSensitivity = 2.0f;
+        public Transform playerCamera;
+
+        [Header("Game Feel (DOTween)")]
+        public float normalFOV = 60f;
+        public float runFOV = 75f;
+        public float fovTweenTime = 0.3f;
+        public float landingDipAmount = 0.15f;
+        public float landingDipTime = 0.2f;
+
+        [Header("UI Controls")]
+        public Button btnJump;
+        public GameObject btnRun;
+
+        private CharacterController controller;
+        private Animator animator;
+        private Camera camComponent;
+
+        private float cameraPitch = 0.0f;
+        private float velocityY = 0.0f;
+        private float originalCamLocalY;
+
+        private bool isRunning = false;
+        private bool isSwiping = false;
+        private bool wasGrounded = true;
+
+        void Start()
+        {
+            controller = GetComponent<CharacterController>();
+            animator = GetComponentInChildren<Animator>();
+
+            if (playerCamera != null)
+            {
+                camComponent = playerCamera.GetComponent<Camera>();
+                originalCamLocalY = playerCamera.localPosition.y;
+            }
+
+            if (btnJump != null)
+            {
+                btnJump.onClick.RemoveAllListeners();
+                btnJump.onClick.AddListener(Jump);
+            }
+
+            if (btnRun != null)
+            {
+                SetupRunButtonEvents();
+            }
+        }
+
+        private void SetupRunButtonEvents()
+        {
+            EventTrigger trigger = btnRun.GetComponent<EventTrigger>();
+            if (trigger == null) trigger = btnRun.AddComponent<EventTrigger>();
+            else trigger.triggers.Clear();
+
+            EventTrigger.Entry pointerDown = new EventTrigger.Entry();
+            pointerDown.eventID = EventTriggerType.PointerDown;
+            pointerDown.callback.AddListener((data) => { StartRun(); });
+            trigger.triggers.Add(pointerDown);
+
+            EventTrigger.Entry pointerUp = new EventTrigger.Entry();
+            pointerUp.eventID = EventTriggerType.PointerUp;
+            pointerUp.callback.AddListener((data) => { StopRun(); });
+            trigger.triggers.Add(pointerUp);
+
+            EventTrigger.Entry pointerExit = new EventTrigger.Entry();
+            pointerExit.eventID = EventTriggerType.PointerExit;
+            pointerExit.callback.AddListener((data) => { StopRun(); });
+            trigger.triggers.Add(pointerExit);
+        }
+
+        void Update()
+        {
+            HandlePCInput();
+            HandleCameraLook();
+            MovePlayer();
+            CheckLanding();
+        }
+
+        private void CheckLanding()
+        {
+            if (!wasGrounded && controller.isGrounded)
+            {
+                playerCamera.DOKill();
+                playerCamera.DOLocalMoveY(originalCamLocalY - landingDipAmount, landingDipTime / 2f)
+                    .SetEase(Ease.OutQuad)
+                    .OnComplete(() => {
+                        playerCamera.DOLocalMoveY(originalCamLocalY, landingDipTime / 2f).SetEase(Ease.InQuad);
+                    });
+            }
+            wasGrounded = controller.isGrounded;
+        }
+
+        private void HandlePCInput()
+        {
+#if UNITY_EDITOR || UNITY_STANDALONE
+            if (Input.GetKeyDown(KeyCode.Space)) Jump();
+
+            if (Input.GetKeyDown(KeyCode.LeftShift)) StartRun();
+            else if (Input.GetKeyUp(KeyCode.LeftShift)) StopRun();
+#endif
+        }
+
+        void MovePlayer()
+        {
+            float moveX = 0f;
+            float moveZ = 0f;
+
+            if (movementJoystick != null)
+            {
+                moveX = movementJoystick.Horizontal;
+                moveZ = movementJoystick.Vertical;
+            }
+
+#if UNITY_EDITOR || UNITY_STANDALONE
+            if (moveX == 0 && moveZ == 0)
+            {
+                moveX = Input.GetAxis("Horizontal");
+                moveZ = Input.GetAxis("Vertical");
+            }
+#endif
+
+            Vector2 inputDir = new Vector2(moveX, moveZ);
+            if (inputDir.magnitude > 1f) inputDir.Normalize();
+
+            bool isMoving = inputDir.magnitude > 0.1f;
+            if (animator != null)
+            {
+                animator.SetBool("isWalking", isMoving && !isRunning);
+                animator.SetBool("isRunning", isMoving && isRunning);
+                animator.SetBool("isGrounded", controller.isGrounded);
+            }
+
+            float currentSpeed = isRunning ? runSpeed : walkSpeed;
+            Vector3 move = transform.right * inputDir.x + transform.forward * inputDir.y;
+            controller.Move(move * currentSpeed * Time.deltaTime);
+
+            if (controller.isGrounded && velocityY < 0)
+            {
+                velocityY = -2f;
+            }
+
+            velocityY += gravity * Time.deltaTime;
+            Vector3 gravityMove = new Vector3(0, velocityY, 0);
+            controller.Move(gravityMove * Time.deltaTime);
+        }
+
+        void HandleCameraLook()
+        {
+            float lookX = 0f;
+            float lookY = 0f;
+
+#if UNITY_EDITOR || UNITY_STANDALONE
+            if (Input.GetMouseButtonDown(1)) isSwiping = true;
+            else if (Input.GetMouseButtonUp(1)) isSwiping = false;
+
+            if (isSwiping && Input.GetMouseButton(1))
+            {
+                lookX = Input.GetAxis("Mouse X") * mouseSensitivity;
+                lookY = Input.GetAxis("Mouse Y") * mouseSensitivity;
+            }
+#else
+            foreach (Touch touch in Input.touches)
+            {
+                if (EventSystem.current.IsPointerOverGameObject(touch.fingerId)) continue;
+                if (touch.phase == TouchPhase.Moved)
+                {
+                    lookX = touch.deltaPosition.x * mouseSensitivity * 0.1f;
+                    lookY = touch.deltaPosition.y * mouseSensitivity * 0.1f;
+                    break; 
+                }
+            }
+#endif
+            cameraPitch -= lookY;
+            cameraPitch = Mathf.Clamp(cameraPitch, -90f, 90f);
+
+            playerCamera.localEulerAngles = Vector3.right * cameraPitch;
+            transform.Rotate(Vector3.up * lookX);
+        }
+
+        private void Jump()
+        {
+            if (controller.isGrounded)
+            {
+                velocityY = Mathf.Sqrt(jumpHeight * -2f * gravity);
+                if (animator != null) animator.SetTrigger("Jump");
+            }
+        }
+
+        private void StartRun()
+        {
+            isRunning = true;
+            if (camComponent != null) camComponent.DOFieldOfView(runFOV, fovTweenTime).SetEase(Ease.OutCubic);
+        }
+
+        private void StopRun()
+        {
+            isRunning = false;
+            if (camComponent != null) camComponent.DOFieldOfView(normalFOV, fovTweenTime).SetEase(Ease.OutCubic);
+        }
+    }
+}
