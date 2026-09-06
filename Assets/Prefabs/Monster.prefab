@@ -49,7 +49,7 @@ Animator:
   m_Controller: {fileID: 9100000, guid: 39060d318f0f91f4fbb0b1c2b9e5e34e, type: 2}
   m_CullingMode: 1
   m_UpdateMode: 0
-  m_ApplyRootMotion: 1
+  m_ApplyRootMotion: 0
   m_LinearVelocityBlending: 0
   m_StabilizeFeet: 0
   m_AnimatePhysics: 0
@@ -92,8 +92,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1d7112750a8fcb343a666ceb6987fc36, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  patrolRadius: 30
-  waitTime: 2
+  currentState: 0
+  patrolSpeed: 3.5
+  chaseSpeed: 9
+  stalkRadius: 25
+  player: {fileID: 0}
+  sightDistance: 20
+  sightAngle: 45
+  hearingDistance: 25
+  obstacleMask:
+    serializedVersion: 2
+    m_Bits: 64
 --- !u!1 &710372725659743259
 GameObject:
   m_ObjectHideFlags: 0
