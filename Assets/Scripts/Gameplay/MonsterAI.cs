@@ -21,6 +21,7 @@ namespace SilentSprint.Gameplay
         public float sightDistance = 20f;     // Sight range
         public float sightAngle = 45f;        // Field of view angle (Total 90 degrees)
         public float hearingDistance = 25f;   // Distance to hear the player running
+        public float eyeHeight = 2.5f;
         public LayerMask obstacleMask;        // Layer of walls (to prevent seeing through walls)
 
         private NavMeshAgent agent;
@@ -92,11 +93,17 @@ namespace SilentSprint.Gameplay
                 // Within field of view
                 if (angle < sightAngle)
                 {
-                    // Raycast to check for obstacles (walls)
-                    if (!Physics.Raycast(transform.position + Vector3.up, directionToPlayer, distanceToPlayer, obstacleMask))
+                    // Within field of view
+                    if (angle < sightAngle)
                     {
-                        currentState = MonsterState.Chase; // Spotted! Switch to chase immediately
-                        return; // Highest priority, exit function
+                        Vector3 eyePosition = transform.position + Vector3.up * eyeHeight;
+
+                        // Raycast to check for obstacles (walls)
+                        if (!Physics.Raycast(eyePosition, directionToPlayer, distanceToPlayer, obstacleMask))
+                        {
+                            currentState = MonsterState.Chase;
+                            return;
+                        }
                     }
                 }
             }
@@ -186,6 +193,26 @@ namespace SilentSprint.Gameplay
             else
             {
                 animator.speed = 1f;
+            }
+        }
+
+        private void OnDrawGizmosSelected()
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireSphere(transform.position, sightDistance);
+
+            Vector3 eyePosition = transform.position + Vector3.up * eyeHeight;
+            Vector3 leftBoundary = Quaternion.Euler(0, -sightAngle, 0) * transform.forward;
+            Vector3 rightBoundary = Quaternion.Euler(0, sightAngle, 0) * transform.forward;
+
+            Gizmos.color = Color.blue;
+            Gizmos.DrawRay(eyePosition, leftBoundary * sightDistance);
+            Gizmos.DrawRay(eyePosition, rightBoundary * sightDistance);
+
+            if (player != null)
+            {
+                Gizmos.color = Color.red;
+                Gizmos.DrawLine(eyePosition, player.position + Vector3.up);
             }
         }
     }

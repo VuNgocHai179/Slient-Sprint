@@ -1,14 +1,12 @@
 using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.UI;
+using SilentSprint.Core;
 using SilentSprint.UI;
-using System;
 using DG.Tweening;
 
 namespace SilentSprint.Gameplay
 {
     [RequireComponent(typeof(CharacterController))]
-    public class PlayerController : MonoBehaviour
+    public class PlayerController : Singleton<PlayerController>
     {
         [Header("Movement Settings")]
         public float walkSpeed = 5.0f;
@@ -21,16 +19,22 @@ namespace SilentSprint.Gameplay
         public float mouseSensitivity = 2.0f;
         public Transform playerCamera;
 
+        [Header("Stamina Settings")]
+        public float maxStamina = 100f;
+        public float drainRate = 25f;
+        public float regenRate = 15f;
+        public float currentStamina { get; private set; }
+        private bool isExhausted = false;
+
+        [Header("Flashlight Settings")]
+        public GameObject flashlightSource;
+
         [Header("Game Feel (DOTween)")]
         public float normalFOV = 60f;
         public float runFOV = 75f;
         public float fovTweenTime = 0.3f;
         public float landingDipAmount = 0.15f;
         public float landingDipTime = 0.2f;
-
-        [Header("UI Controls")]
-        public Button btnJump;
-        public GameObject btnRun;
 
         private CharacterController controller;
         private Animator animator;
@@ -46,6 +50,8 @@ namespace SilentSprint.Gameplay
 
         void Start()
         {
+            currentStamina = maxStamina;
+
             controller = GetComponent<CharacterController>();
             animator = GetComponentInChildren<Animator>();
 
@@ -54,39 +60,6 @@ namespace SilentSprint.Gameplay
                 camComponent = playerCamera.GetComponent<Camera>();
                 originalCamLocalY = playerCamera.localPosition.y;
             }
-
-            if (btnJump != null)
-            {
-                btnJump.onClick.RemoveAllListeners();
-                btnJump.onClick.AddListener(Jump);
-            }
-
-            if (btnRun != null)
-            {
-                SetupRunButtonEvents();
-            }
-        }
-
-        private void SetupRunButtonEvents()
-        {
-            EventTrigger trigger = btnRun.GetComponent<EventTrigger>();
-            if (trigger == null) trigger = btnRun.AddComponent<EventTrigger>();
-            else trigger.triggers.Clear();
-
-            EventTrigger.Entry pointerDown = new EventTrigger.Entry();
-            pointerDown.eventID = EventTriggerType.PointerDown;
-            pointerDown.callback.AddListener((data) => { StartRun(); });
-            trigger.triggers.Add(pointerDown);
-
-            EventTrigger.Entry pointerUp = new EventTrigger.Entry();
-            pointerUp.eventID = EventTriggerType.PointerUp;
-            pointerUp.callback.AddListener((data) => { StopRun(); });
-            trigger.triggers.Add(pointerUp);
-
-            EventTrigger.Entry pointerExit = new EventTrigger.Entry();
-            pointerExit.eventID = EventTriggerType.PointerExit;
-            pointerExit.callback.AddListener((data) => { StopRun(); });
-            trigger.triggers.Add(pointerExit);
         }
 
         void Update()
@@ -104,7 +77,8 @@ namespace SilentSprint.Gameplay
                 playerCamera.DOKill();
                 playerCamera.DOLocalMoveY(originalCamLocalY - landingDipAmount, landingDipTime / 2f)
                     .SetEase(Ease.OutQuad)
-                    .OnComplete(() => {
+                    .OnComplete(() =>
+                    {
                         playerCamera.DOLocalMoveY(originalCamLocalY, landingDipTime / 2f).SetEase(Ease.InQuad);
                     });
             }
@@ -118,6 +92,8 @@ namespace SilentSprint.Gameplay
 
             if (Input.GetKeyDown(KeyCode.LeftShift)) StartRun();
             else if (Input.GetKeyUp(KeyCode.LeftShift)) StopRun();
+
+            if (Input.GetKeyDown(KeyCode.F)) ToggleFlashlight();
 #endif
         }
 
@@ -144,6 +120,31 @@ namespace SilentSprint.Gameplay
             if (inputDir.magnitude > 1f) inputDir.Normalize();
 
             bool isMoving = inputDir.magnitude > 0.1f;
+
+            if (isRunning && isMoving)
+            {
+                currentStamina -= drainRate * Time.deltaTime;
+                if (currentStamina <= 0f)
+                {
+                    currentStamina = 0f;
+                    isExhausted = true;
+                    StopRun();
+                }
+            }
+            else
+            {
+                if (currentStamina < maxStamina)
+                {
+                    currentStamina += regenRate * Time.deltaTime;
+                    if (currentStamina > maxStamina) currentStamina = maxStamina;
+
+                    if (isExhausted && currentStamina >= 15f)
+                    {
+                        isExhausted = false;
+                    }
+                }
+            }
+
             if (animator != null)
             {
                 animator.SetBool("isWalking", isMoving && !isRunning);
@@ -182,12 +183,12 @@ namespace SilentSprint.Gameplay
 #else
             foreach (Touch touch in Input.touches)
             {
-                if (EventSystem.current.IsPointerOverGameObject(touch.fingerId)) continue;
+                if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject(touch.fingerId)) continue;
                 if (touch.phase == TouchPhase.Moved)
                 {
                     lookX = touch.deltaPosition.x * mouseSensitivity * 0.1f;
                     lookY = touch.deltaPosition.y * mouseSensitivity * 0.1f;
-                    break; 
+                    break;
                 }
             }
 #endif
@@ -198,7 +199,7 @@ namespace SilentSprint.Gameplay
             transform.Rotate(Vector3.up * lookX);
         }
 
-        private void Jump()
+        public void Jump()
         {
             if (controller.isGrounded)
             {
@@ -207,16 +208,26 @@ namespace SilentSprint.Gameplay
             }
         }
 
-        private void StartRun()
+        public void StartRun()
         {
+            if (isExhausted) return;
+
             isRunning = true;
             if (camComponent != null) camComponent.DOFieldOfView(runFOV, fovTweenTime).SetEase(Ease.OutCubic);
         }
 
-        private void StopRun()
+        public void StopRun()
         {
             isRunning = false;
             if (camComponent != null) camComponent.DOFieldOfView(normalFOV, fovTweenTime).SetEase(Ease.OutCubic);
+        }
+
+        public void ToggleFlashlight()
+        {
+            if (flashlightSource != null)
+            {
+                flashlightSource.SetActive(!flashlightSource.activeSelf);
+            }
         }
     }
 }
