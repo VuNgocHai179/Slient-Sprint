@@ -1,13 +1,18 @@
-using UnityEngine;
+using SilentSprint.Core;
+using System;
 using System.Collections.Generic;
+using UnityEngine;
+using Random = UnityEngine.Random;
 
 namespace SilentSprint.Gameplay
 {
-    public class ItemManager : MonoBehaviour
+    public class ItemManager : Singleton<ItemManager>
     {
         [Header("Item Settings")]
-        public GameObject thachTriPrefab;
-        private int numberOfItemsToSpawn = 10;
+        public int maxFreedomStones = 20;
+        public int currentFreedomStones = 0;
+
+        public static event Action<int, int> OnFreedomStoneChanged;
 
         [Header("Spawn Locations")]
         public List<Transform> spawnPoints;
@@ -19,13 +24,20 @@ namespace SilentSprint.Gameplay
 
         private void SpawnItemsRandomly()
         {
-            if (thachTriPrefab == null || spawnPoints.Count == 0)
+            if (spawnPoints.Count == 0)
             {
-                Debug.LogWarning("Missing Prefab or Spawn Points in ItemManager!");
                 return;
             }
 
-            int spawnCount = Mathf.Min(numberOfItemsToSpawn, spawnPoints.Count);
+            foreach (Transform point in spawnPoints)
+            {
+                if (point != null)
+                {
+                    point.gameObject.SetActive(false);
+                }
+            }
+
+            int spawnCount = Mathf.Min(maxFreedomStones, spawnPoints.Count);
             List<Transform> availablePoints = new List<Transform>(spawnPoints);
 
             for (int i = 0; i < spawnCount; i++)
@@ -33,8 +45,25 @@ namespace SilentSprint.Gameplay
                 int randomIndex = Random.Range(0, availablePoints.Count);
                 Transform selectedPoint = availablePoints[randomIndex];
 
-                Instantiate(thachTriPrefab, selectedPoint.position, selectedPoint.rotation);
+                selectedPoint.gameObject.SetActive(true);
+
                 availablePoints.RemoveAt(randomIndex);
+            }
+        }
+
+        public void CollectFreedomStone(int amount = 1)
+        {
+            currentFreedomStones += amount;
+            if (currentFreedomStones > maxFreedomStones)
+            {
+                currentFreedomStones = maxFreedomStones;
+            }
+
+            OnFreedomStoneChanged?.Invoke(currentFreedomStones, maxFreedomStones);
+
+            if (currentFreedomStones >= maxFreedomStones)
+            {
+                Debug.Log("DONE FreedomStone!");
             }
         }
     }

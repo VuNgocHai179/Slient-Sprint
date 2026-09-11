@@ -149,7 +149,10 @@ namespace SilentSprint.Gameplay
             {
                 animator.SetBool("isWalking", isMoving && !isRunning);
                 animator.SetBool("isRunning", isMoving && isRunning);
-                animator.SetBool("isGrounded", controller.isGrounded);
+                if (velocityY <= 0)
+                {
+                    animator.SetBool("isGrounded", controller.isGrounded);
+                }
             }
 
             float currentSpeed = isRunning ? runSpeed : walkSpeed;
@@ -204,7 +207,12 @@ namespace SilentSprint.Gameplay
             if (controller.isGrounded)
             {
                 velocityY = Mathf.Sqrt(jumpHeight * -2f * gravity);
-                if (animator != null) animator.SetTrigger("Jump");
+
+                if (animator != null)
+                {
+                    animator.SetTrigger("Jump");
+                    animator.SetBool("isGrounded", false);
+                }
             }
         }
 

@@ -14,15 +14,16 @@ namespace SilentSprint.Gameplay
         [Header("Movement Settings")]
         public float patrolSpeed = 3.5f;
         public float chaseSpeed = 9f;
-        public float stalkRadius = 25f; // Radius to roam around the Player's area
+        public float stalkRadius = 25f;
 
         [Header("Senses")]
         public Transform player;
-        public float sightDistance = 20f;     // Sight range
-        public float sightAngle = 45f;        // Field of view angle (Total 90 degrees)
-        public float hearingDistance = 25f;   // Distance to hear the player running
+        public float sightDistance = 20f;
+        public float sightAngle = 45f;
+        public float hearingDistance = 25f;
         public float eyeHeight = 2.5f;
-        public LayerMask obstacleMask;        // Layer of walls (to prevent seeing through walls)
+        public float catchDistance = 1.6f;
+        public LayerMask obstacleMask;
 
         private NavMeshAgent agent;
         private Animator animator;
@@ -31,16 +32,15 @@ namespace SilentSprint.Gameplay
         private Vector3 investigateTarget;
         private float waitTimer = 0f;
         private float patrolWaitTime = 2f;
+        private bool hasCaughtPlayer = false;
 
         void Start()
         {
             agent = GetComponent<NavMeshAgent>();
             animator = GetComponent<Animator>();
 
-            // FIND PLAYER VIA SCRIPT INSTEAD OF USING TAGS
             if (player == null)
             {
-                // Find the object in the scene with the PlayerController script attached
                 playerController = FindAnyObjectByType<PlayerController>();
                 if (playerController != null)
                 {
@@ -59,12 +59,11 @@ namespace SilentSprint.Gameplay
 
         void Update()
         {
-            if (player == null) return;
+            if (player == null || hasCaughtPlayer) return;
 
             UpdateAnimation();
             CheckSenses();
 
-            // Execute logic based on the current state
             switch (currentState)
             {
                 case MonsterState.Patrol:
@@ -79,56 +78,47 @@ namespace SilentSprint.Gameplay
             }
         }
 
-        // --- SENSES ---
         private void CheckSenses()
         {
             float distanceToPlayer = Vector3.Distance(transform.position, player.position);
 
-            // 1. VISUAL CHECK (Seeing the Player)
+            // 1. VISUAL CHECK
             if (distanceToPlayer <= sightDistance)
             {
                 Vector3 directionToPlayer = (player.position - transform.position).normalized;
                 float angle = Vector3.Angle(transform.forward, directionToPlayer);
 
-                // Within field of view
                 if (angle < sightAngle)
                 {
-                    // Within field of view
-                    if (angle < sightAngle)
-                    {
-                        Vector3 eyePosition = transform.position + Vector3.up * eyeHeight;
+                    Vector3 eyePosition = transform.position + Vector3.up * eyeHeight;
 
-                        // Raycast to check for obstacles (walls)
-                        if (!Physics.Raycast(eyePosition, directionToPlayer, distanceToPlayer, obstacleMask))
-                        {
-                            currentState = MonsterState.Chase;
-                            return;
-                        }
+                    if (!Physics.Raycast(eyePosition, directionToPlayer, distanceToPlayer, obstacleMask))
+                    {
+                        currentState = MonsterState.Chase;
+                        return;
                     }
                 }
             }
 
-            // 2. HEARING CHECK (Hearing the Player run)
+            // 2. HEARING CHECK
             if (currentState != MonsterState.Chase && distanceToPlayer <= hearingDistance)
             {
-                // Check the Player's Animator to see if isRunning is true
                 Animator playerAnim = player.GetComponentInChildren<Animator>();
                 if (playerAnim != null && playerAnim.GetBool("isRunning"))
                 {
-                    investigateTarget = player.position; // Remember the location of the noise
+                    investigateTarget = player.position;
                     currentState = MonsterState.Investigate;
                 }
             }
 
-            // 3. LOSING THE TARGET (Running too far out of sight)
+            // 3. LOSING THE TARGET
             if (currentState == MonsterState.Chase && distanceToPlayer > sightDistance * 1.5f)
             {
-                currentState = MonsterState.Investigate; // Lost track, stand and investigate
+                currentState = MonsterState.Investigate;
                 investigateTarget = player.position;
             }
         }
 
-        // --- AI STATES ---
         private void PatrolBehavior()
         {
             agent.speed = patrolSpeed;
@@ -138,7 +128,6 @@ namespace SilentSprint.Gameplay
                 waitTimer += Time.deltaTime;
                 if (waitTimer >= patrolWaitTime)
                 {
-                    // Random point around the PLAYER'S POSITION to always stay close indirectly
                     Vector3 randomDirection = Random.insideUnitSphere * stalkRadius;
                     randomDirection += player.position;
 
@@ -159,7 +148,6 @@ namespace SilentSprint.Gameplay
 
             if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
             {
-                // Arrived and found nothing, look around a bit then resume patrol
                 waitTimer += Time.deltaTime;
                 if (waitTimer >= 3f)
                 {
@@ -172,20 +160,40 @@ namespace SilentSprint.Gameplay
         private void ChaseBehavior()
         {
             agent.speed = chaseSpeed;
-            agent.SetDestination(player.position); // Rush straight to the Player
+            agent.SetDestination(player.position);
+
+            float distanceToPlayer = Vector3.Distance(transform.position, player.position);
+            if (distanceToPlayer <= catchDistance)
+            {
+                CatchPlayer();
+            }
         }
 
-        // --- ANIMATION ---
+        private void CatchPlayer()
+        {
+            hasCaughtPlayer = true;
+            agent.isStopped = true;
+            agent.velocity = Vector3.zero;
+
+            if (animator != null)
+            {
+                animator.SetBool("isWalking", false);
+                animator.speed = 1f;
+            }
+
+            if (JumpscareController.Instance != null)
+            {
+                JumpscareController.Instance.TriggerCaughtJumpscare(transform.position, gameObject);
+            }
+        }
+
         private void UpdateAnimation()
         {
             if (animator == null) return;
 
             float speed = agent.velocity.magnitude;
-
-            // Enable walking animation if moving
             animator.SetBool("isWalking", speed > 0.1f);
 
-            // Fast-forward footstep speed when chasing to create a terrifying effect
             if (speed > 0.1f)
             {
                 animator.speed = speed / patrolSpeed;

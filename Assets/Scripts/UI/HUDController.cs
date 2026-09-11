@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using TMPro;
 using SilentSprint.Gameplay;
 
 namespace SilentSprint.UI
@@ -15,6 +16,9 @@ namespace SilentSprint.UI
         [Header("Status UI")]
         public Image imgStamina;
 
+        [Header("Item Counter UI")]
+        public TextMeshProUGUI txtFreedomStone;
+
         private PlayerController player;
 
         void Start()
@@ -24,6 +28,29 @@ namespace SilentSprint.UI
             SetupJumpButton();
             SetupRunButton();
             SetupFlashlightButton();
+
+            if (ItemManager.Instance != null)
+            {
+                UpdateFreedomStoneDisplay(ItemManager.Instance.currentFreedomStones, ItemManager.Instance.maxFreedomStones);
+            }
+        }
+
+        void OnEnable()
+        {
+            ItemManager.OnFreedomStoneChanged += UpdateFreedomStoneDisplay;
+        }
+
+        void OnDisable()
+        {
+            ItemManager.OnFreedomStoneChanged -= UpdateFreedomStoneDisplay;
+        }
+
+        public void UpdateFreedomStoneDisplay(int current, int max)
+        {
+            if (txtFreedomStone != null)
+            {
+                txtFreedomStone.text = $"{current}/{max}";
+            }
         }
 
         private void Update()
