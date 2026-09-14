@@ -18,7 +18,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &5243625859767114140
 Transform:
   m_ObjectHideFlags: 0
@@ -101,6 +101,7 @@ MonoBehaviour:
   sightAngle: 45
   hearingDistance: 25
   eyeHeight: 2.5
+  catchDistance: 1.6
   obstacleMask:
     serializedVersion: 2
     m_Bits: 64

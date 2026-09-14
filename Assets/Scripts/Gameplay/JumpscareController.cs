@@ -22,7 +22,7 @@ namespace SilentSprint.Gameplay
 
         [Header("Timing & Game Feel")]
         private float turnDuration = 0.22f;
-        private float lungeDuration = 0.2f;
+        private float lungeDuration = 0.1f;
         private float lungeStartOffsetZ = 1.8f;
         private float lungeFinalOffsetZ = 0f;
         private float screamDuration = 2.6f;
