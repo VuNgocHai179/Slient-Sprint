@@ -1,6 +1,7 @@
 using UnityEngine;
 using SilentSprint.Gameplay.Minigames1;
 using SilentSprint.Gameplay.Minigames2;
+using SilentSprint.Gameplay.Minigames3;
 using UnityEngine.UI;
 
 namespace SilentSprint.Gameplay
@@ -16,6 +17,7 @@ namespace SilentSprint.Gameplay
         [Header("Minigame Prefabs")]
         public GameObject cupGamePrefab;
         public GameObject memoryGamePrefab;
+        public GameObject bombGamePrefab;
 
         [Header("Punishment Jumpscare")]
         public GameObject jumpscareMonster;
@@ -23,35 +25,25 @@ namespace SilentSprint.Gameplay
         [Header("Test Buttons")]
         public Button _btnTestGame1;
         public Button _btnTestGame2;
+        public Button _btnTestGame3;
 
         private GameObject spawnedMinigameObj;
         private Mini1gameManager activeCupGameInstance;
         private Mini2gameManager activeMemoryGameInstance;
+        private Mini3gameManager activeBombGameInstance;
 
         private void OnEnable()
         {
-            if (_btnTestGame1 != null)
-            {
-                _btnTestGame1.onClick.AddListener(PlayCupMinigame);
-            }
-
-            if (_btnTestGame2 != null)
-            {
-                _btnTestGame2.onClick.AddListener(PlayMemoryMinigame);
-            }
+            if (_btnTestGame1 != null) _btnTestGame1.onClick.AddListener(PlayCupMinigame);
+            if (_btnTestGame2 != null) _btnTestGame2.onClick.AddListener(PlayMemoryMinigame);
+            if (_btnTestGame3 != null) _btnTestGame3.onClick.AddListener(PlayBombMinigame);
         }
 
         private void OnDisable()
         {
-            if (_btnTestGame1 != null)
-            {
-                _btnTestGame1.onClick.RemoveListener(PlayCupMinigame);
-            }
-
-            if (_btnTestGame2 != null)
-            {
-                _btnTestGame2.onClick.RemoveListener(PlayMemoryMinigame);
-            }
+            if (_btnTestGame1 != null) _btnTestGame1.onClick.RemoveListener(PlayCupMinigame);
+            if (_btnTestGame2 != null) _btnTestGame2.onClick.RemoveListener(PlayMemoryMinigame);
+            if (_btnTestGame3 != null) _btnTestGame3.onClick.RemoveListener(PlayBombMinigame);
 
             CleanupActiveMinigame();
         }
@@ -59,14 +51,9 @@ namespace SilentSprint.Gameplay
         public void PlayCupMinigame()
         {
             if (cupGamePrefab == null || spawnedMinigameObj != null) return;
-
             PreparePlayerForMinigame();
 
-            Vector3 spawnPos = minigameSpawnPoint != null ? minigameSpawnPoint.position : new Vector3(0, -100, 0);
-            Quaternion spawnRot = minigameSpawnPoint != null ? minigameSpawnPoint.rotation : Quaternion.identity;
-
-            spawnedMinigameObj = Instantiate(cupGamePrefab, spawnPos, spawnRot, minigameSpawnPoint);
-
+            SpawnGame(cupGamePrefab);
             activeCupGameInstance = spawnedMinigameObj.GetComponent<Mini1gameManager>();
             if (activeCupGameInstance != null)
             {
@@ -79,14 +66,9 @@ namespace SilentSprint.Gameplay
         public void PlayMemoryMinigame()
         {
             if (memoryGamePrefab == null || spawnedMinigameObj != null) return;
-
             PreparePlayerForMinigame();
 
-            Vector3 spawnPos = minigameSpawnPoint != null ? minigameSpawnPoint.position : new Vector3(0, -100, 0);
-            Quaternion spawnRot = minigameSpawnPoint != null ? minigameSpawnPoint.rotation : Quaternion.identity;
-
-            spawnedMinigameObj = Instantiate(memoryGamePrefab, spawnPos, spawnRot, minigameSpawnPoint);
-
+            SpawnGame(memoryGamePrefab);
             activeMemoryGameInstance = spawnedMinigameObj.GetComponent<Mini2gameManager>();
             if (activeMemoryGameInstance != null)
             {
@@ -94,6 +76,28 @@ namespace SilentSprint.Gameplay
                 activeMemoryGameInstance.OnGameLost += HandleMinigameLost;
                 activeMemoryGameInstance.StartMinigame();
             }
+        }
+
+        public void PlayBombMinigame()
+        {
+            if (bombGamePrefab == null || spawnedMinigameObj != null) return;
+            PreparePlayerForMinigame();
+
+            SpawnGame(bombGamePrefab);
+            activeBombGameInstance = spawnedMinigameObj.GetComponent<Mini3gameManager>();
+            if (activeBombGameInstance != null)
+            {
+                activeBombGameInstance.OnGameWon += HandleMinigameWon;
+                activeBombGameInstance.OnGameLost += HandleMinigameLost;
+                activeBombGameInstance.StartMinigame();
+            }
+        }
+
+        private void SpawnGame(GameObject prefab)
+        {
+            Vector3 spawnPos = minigameSpawnPoint != null ? minigameSpawnPoint.position : new Vector3(0, -100, 0);
+            Quaternion spawnRot = minigameSpawnPoint != null ? minigameSpawnPoint.rotation : Quaternion.identity;
+            spawnedMinigameObj = Instantiate(prefab, spawnPos, spawnRot, minigameSpawnPoint);
         }
 
         private void PreparePlayerForMinigame()
@@ -109,9 +113,7 @@ namespace SilentSprint.Gameplay
         private void HandleMinigameWon()
         {
             CleanupActiveMinigame();
-
             if (keyReward != null) keyReward.SetActive(true);
-
             RestorePlayerAfterWin();
         }
 
@@ -144,10 +146,7 @@ namespace SilentSprint.Gameplay
                 PlayerController.Instance.enabled = false;
             }
 
-            if (jumpscareMonster != null)
-            {
-                jumpscareMonster.SetActive(true);
-            }
+            if (jumpscareMonster != null) jumpscareMonster.SetActive(true);
 
             if (JumpscareController.Instance != null)
             {
@@ -174,6 +173,14 @@ namespace SilentSprint.Gameplay
                 activeMemoryGameInstance.OnGameLost -= HandleMinigameLost;
                 activeMemoryGameInstance.DisposeTweens();
                 activeMemoryGameInstance = null;
+            }
+
+            if (activeBombGameInstance != null)
+            {
+                activeBombGameInstance.OnGameWon -= HandleMinigameWon;
+                activeBombGameInstance.OnGameLost -= HandleMinigameLost;
+                activeBombGameInstance.DisposeTweens();
+                activeBombGameInstance = null;
             }
 
             if (spawnedMinigameObj != null)
