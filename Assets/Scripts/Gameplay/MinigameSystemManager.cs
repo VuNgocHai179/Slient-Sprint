@@ -1,12 +1,14 @@
-using UnityEngine;
+using System.Collections.Generic;
+using SilentSprint.Core;
+using SilentSprint.Dialogues;
 using SilentSprint.Gameplay.Minigames1;
 using SilentSprint.Gameplay.Minigames2;
 using SilentSprint.Gameplay.Minigames3;
-using UnityEngine.UI;
+using UnityEngine;
 
 namespace SilentSprint.Gameplay
 {
-    public class MinigameSystemManager : MonoBehaviour
+    public class MinigameSystemManager : Singleton<MinigameSystemManager>
     {
         [Header("Global Setup")]
         public GameObject mainHUD;
@@ -22,39 +24,159 @@ namespace SilentSprint.Gameplay
         [Header("Punishment Jumpscare")]
         public GameObject jumpscareMonster;
 
-        [Header("Test Buttons")]
-        public Button _btnTestGame1;
-        public Button _btnTestGame2;
-        public Button _btnTestGame3;
+        [Header("Đóng băng quái")]
+        [Tooltip("Đóng băng quái trong lúc chơi mini game, để người chơi không bị tóm khi đang không điều khiển được nhân vật.")]
+        public bool freezeMonstersDuringMinigame = true;
+
+        [Header("Hội thoại")]
+        [Tooltip("Bộ điều phối hội thoại. Mọi cuộc nói chuyện ở StonePedestal và phần hướng dẫn đều đi qua đây.")]
+        public DialogueManager dialogueManager;
+
+        [Tooltip("Phát đoạn hướng dẫn cách chơi ngay khi vào màn.")]
+        public bool playIntroDialogueOnStart = true;
+
+        private readonly List<MinigamePedestal> pedestals = new List<MinigamePedestal>();
+
+        // Pedestal đang kích hoạt popup (giữ lại để không hiện lại popup khi người chơi vẫn đứng trong vùng).
+        private MinigamePedestal currentPedestal;
+        // Pedestal đang được chơi, dùng để đánh dấu hoàn thành khi thắng.
+        private MinigamePedestal activePedestal;
 
         private GameObject spawnedMinigameObj;
         private Mini1gameManager activeCupGameInstance;
         private Mini2gameManager activeMemoryGameInstance;
         private Mini3gameManager activeBombGameInstance;
 
-        private void OnEnable()
+        private bool IsMinigameRunning => spawnedMinigameObj != null;
+
+        protected override void Awake()
         {
-            if (_btnTestGame1 != null) _btnTestGame1.onClick.AddListener(PlayCupMinigame);
-            if (_btnTestGame2 != null) _btnTestGame2.onClick.AddListener(PlayMemoryMinigame);
-            if (_btnTestGame3 != null) _btnTestGame3.onClick.AddListener(PlayBombMinigame);
+            base.Awake();
+
+            pedestals.AddRange(Object.FindObjectsByType<MinigamePedestal>(
+                FindObjectsInactive.Exclude, FindObjectsSortMode.None));
+
+            if (pedestals.Count == 0)
+            {
+                Debug.LogWarning("[MinigameSystemManager] Không tìm thấy MinigamePedestal nào đang bật trong scene: người chơi vào vùng StonePedestal cũng sẽ không thấy popup.", this);
+            }
         }
 
-        private void OnDisable()
+        private void Start()
         {
-            if (_btnTestGame1 != null) _btnTestGame1.onClick.RemoveListener(PlayCupMinigame);
-            if (_btnTestGame2 != null) _btnTestGame2.onClick.RemoveListener(PlayMemoryMinigame);
-            if (_btnTestGame3 != null) _btnTestGame3.onClick.RemoveListener(PlayBombMinigame);
+            if (dialogueManager == null) dialogueManager = DialogueManager.Instance;
 
-            CleanupActiveMinigame();
+            if (dialogueManager == null)
+            {
+                Debug.LogError("[MinigameSystemManager] Chưa gán DialogueManager nên không thể nói chuyện ở StonePedestal.", this);
+                return;
+            }
+
+            if (playIntroDialogueOnStart)
+            {
+                dialogueManager.Play(GameplayDialogues.Intro());
+            }
+        }
+
+        private void Update()
+        {
+            if (dialogueManager == null) return;
+
+            // Đang đối thoại thì không dò StonePedestal: người chơi đang bị khoá nên không đi đâu được,
+            // và phải đợi hội thoại kết thúc mới xét lại.
+            if (dialogueManager.IsPlaying) return;
+
+            if (IsMinigameRunning)
+            {
+                SetCurrentPedestal(null);
+                return;
+            }
+
+            PlayerController player = PlayerController.Instance;
+            // isActiveAndEnabled (không chỉ activeInHierarchy): sau khi thua mini game
+            // player bị disable nên không được hiện lại popup đè lên jumpscare.
+            if (player == null || !player.isActiveAndEnabled)
+            {
+                SetCurrentPedestal(null);
+                return;
+            }
+
+            SetCurrentPedestal(FindNearestPedestal(player.transform.position));
+        }
+
+        private MinigamePedestal FindNearestPedestal(Vector3 playerPosition)
+        {
+            MinigamePedestal nearest = null;
+            float nearestSqrDistance = float.MaxValue;
+
+            for (int i = 0; i < pedestals.Count; i++)
+            {
+                MinigamePedestal pedestal = pedestals[i];
+                if (pedestal == null || pedestal.IsCompleted) continue;
+                if (!pedestal.IsPlayerInside(playerPosition)) continue;
+
+                float sqrDistance = (pedestal.ZoneCenter - playerPosition).sqrMagnitude;
+                if (sqrDistance < nearestSqrDistance)
+                {
+                    nearestSqrDistance = sqrDistance;
+                    nearest = pedestal;
+                }
+            }
+
+            return nearest;
+        }
+
+        private void SetCurrentPedestal(MinigamePedestal pedestal)
+        {
+            if (currentPedestal == pedestal) return;
+
+            currentPedestal = pedestal;
+
+            if (currentPedestal == null) return;
+
+            // currentPedestal được giữ nguyên sau khi hội thoại kết thúc: người chơi phải rời vùng
+            // rồi quay lại thì cuộc nói chuyện mới bắt đầu lại, tránh mở lại liên tục.
+            StartPedestalDialogue(currentPedestal);
+        }
+
+        private void StartPedestalDialogue(MinigamePedestal pedestal)
+        {
+            if (dialogueManager == null) return;
+
+            MinigameKind kind = pedestal.minigameKind;
+
+            dialogueManager.Play(GameplayDialogues.PedestalConversation(kind), result =>
+            {
+                if (result.closed) return;
+                if (result.choiceIndex != GameplayDialogues.ChoiceEnterGame) return;
+                if (IsMinigameRunning) return;
+
+                StartMinigame(kind);
+            });
+        }
+
+        private void StartMinigame(MinigameKind kind)
+        {
+            switch (kind)
+            {
+                case MinigameKind.Cup:
+                    PlayCupMinigame();
+                    break;
+                case MinigameKind.Memory:
+                    PlayMemoryMinigame();
+                    break;
+                case MinigameKind.Bomb:
+                    PlayBombMinigame();
+                    break;
+            }
         }
 
         public void PlayCupMinigame()
         {
-            if (cupGamePrefab == null || spawnedMinigameObj != null) return;
-            PreparePlayerForMinigame();
+            if (cupGamePrefab == null || IsMinigameRunning) return;
 
-            SpawnGame(cupGamePrefab);
-            activeCupGameInstance = spawnedMinigameObj.GetComponent<Mini1gameManager>();
+            BeginMinigameSession(cupGamePrefab);
+            activeCupGameInstance = spawnedMinigameObj != null ? spawnedMinigameObj.GetComponent<Mini1gameManager>() : null;
             if (activeCupGameInstance != null)
             {
                 activeCupGameInstance.OnGameWon += HandleMinigameWon;
@@ -65,11 +187,10 @@ namespace SilentSprint.Gameplay
 
         public void PlayMemoryMinigame()
         {
-            if (memoryGamePrefab == null || spawnedMinigameObj != null) return;
-            PreparePlayerForMinigame();
+            if (memoryGamePrefab == null || IsMinigameRunning) return;
 
-            SpawnGame(memoryGamePrefab);
-            activeMemoryGameInstance = spawnedMinigameObj.GetComponent<Mini2gameManager>();
+            BeginMinigameSession(memoryGamePrefab);
+            activeMemoryGameInstance = spawnedMinigameObj != null ? spawnedMinigameObj.GetComponent<Mini2gameManager>() : null;
             if (activeMemoryGameInstance != null)
             {
                 activeMemoryGameInstance.OnGameWon += HandleMinigameWon;
@@ -80,17 +201,23 @@ namespace SilentSprint.Gameplay
 
         public void PlayBombMinigame()
         {
-            if (bombGamePrefab == null || spawnedMinigameObj != null) return;
-            PreparePlayerForMinigame();
+            if (bombGamePrefab == null || IsMinigameRunning) return;
 
-            SpawnGame(bombGamePrefab);
-            activeBombGameInstance = spawnedMinigameObj.GetComponent<Mini3gameManager>();
+            BeginMinigameSession(bombGamePrefab);
+            activeBombGameInstance = spawnedMinigameObj != null ? spawnedMinigameObj.GetComponent<Mini3gameManager>() : null;
             if (activeBombGameInstance != null)
             {
                 activeBombGameInstance.OnGameWon += HandleMinigameWon;
                 activeBombGameInstance.OnGameLost += HandleMinigameLost;
                 activeBombGameInstance.StartMinigame();
             }
+        }
+
+        private void BeginMinigameSession(GameObject prefab)
+        {
+            activePedestal = currentPedestal;
+            PreparePlayerForMinigame();
+            SpawnGame(prefab);
         }
 
         private void SpawnGame(GameObject prefab)
@@ -102,6 +229,7 @@ namespace SilentSprint.Gameplay
 
         private void PreparePlayerForMinigame()
         {
+            if (freezeMonstersDuringMinigame) MonsterAI.PauseAll();
             if (mainHUD != null) mainHUD.SetActive(false);
             if (PlayerController.Instance != null)
             {
@@ -112,6 +240,12 @@ namespace SilentSprint.Gameplay
 
         private void HandleMinigameWon()
         {
+            if (activePedestal != null)
+            {
+                activePedestal.MarkCompleted();
+                activePedestal = null;
+            }
+
             CleanupActiveMinigame();
             if (keyReward != null) keyReward.SetActive(true);
             RestorePlayerAfterWin();
@@ -130,11 +264,17 @@ namespace SilentSprint.Gameplay
             }
 
             if (mainHUD != null) mainHUD.SetActive(true);
+
+            if (freezeMonstersDuringMinigame) MonsterAI.ResumeAll();
         }
 
         private void HandleMinigameLost()
         {
+            activePedestal = null;
             CleanupActiveMinigame();
+
+            // Ván mini game đã kết thúc nên thả quái ra; phần jumpscare phía dưới là kịch bản riêng.
+            if (freezeMonstersDuringMinigame) MonsterAI.ResumeAll();
 
             if (PlayerController.Instance != null)
             {

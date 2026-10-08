@@ -3,6 +3,7 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using TMPro;
 using SilentSprint.Gameplay;
+using SilentSprint.UI.Dialogs;
 
 namespace SilentSprint.UI
 {
@@ -12,6 +13,14 @@ namespace SilentSprint.UI
         public Button btnJump;
         public GameObject btnRun;
         public Button btnFlashlight;
+
+        [Header("La bàn")]
+        [Tooltip("Nút bật/tắt la bàn trên MainHUD. Chỉ hiện sau khi người chơi nhận được la bàn.")]
+        public Button btnCompass;
+
+        [Header("Tạm dừng")]
+        [Tooltip("Nút tạm dừng trên MainHUD, mở bảng DlgPause.")]
+        public Button btnPause;
 
         [Header("Status UI")]
         public Image imgStamina;
@@ -28,6 +37,8 @@ namespace SilentSprint.UI
             SetupJumpButton();
             SetupRunButton();
             SetupFlashlightButton();
+            SetupCompassButton();
+            SetupPauseButton();
 
             if (ItemManager.Instance != null)
             {
@@ -116,6 +127,59 @@ namespace SilentSprint.UI
                     if (player != null) player.ToggleFlashlight();
                 });
             }
+        }
+
+        /// <summary>Bật/tắt nút BtnCompass. Nút này chỉ hiện sau khi người chơi nhận được la bàn.</summary>
+        public void SetCompassButtonVisible(bool visible)
+        {
+            if (btnCompass == null) return;
+
+            if (btnCompass.gameObject.activeSelf != visible)
+            {
+                btnCompass.gameObject.SetActive(visible);
+            }
+        }
+
+        private void SetupCompassButton()
+        {
+            if (btnCompass == null)
+            {
+                // Có thể chưa gán tay trong Inspector: tìm luôn nút cùng tên nằm trên MainHUD.
+                Transform found = transform.Find("BtnCompass");
+                if (found != null) btnCompass = found.GetComponent<Button>();
+            }
+
+            if (btnCompass == null) return;
+
+            btnCompass.onClick.RemoveAllListeners();
+            btnCompass.onClick.AddListener(() =>
+            {
+                if (CompassSystem.Instance != null) CompassSystem.Instance.ToggleCompass();
+            });
+
+            // Chưa nhặt đủ mảnh đá thì chưa có la bàn, nút phải ẩn đi.
+            if (CompassSystem.Instance == null || !CompassSystem.Instance.IsUnlocked)
+            {
+                SetCompassButtonVisible(false);
+            }
+        }
+
+        private void SetupPauseButton()
+        {
+            if (btnPause == null)
+            {
+                // Có thể chưa gán tay trong Inspector: tìm luôn nút cùng tên nằm trên MainHUD.
+                Transform found = transform.Find("btn_Pause");
+                if (found != null) btnPause = found.GetComponent<Button>();
+            }
+
+            if (btnPause == null) return;
+
+            btnPause.onClick.RemoveAllListeners();
+            btnPause.onClick.AddListener(() =>
+            {
+                if (DialogManager.Instance != null) DialogManager.Instance.Toggle<PauseDialog>();
+            });
         }
     }
 }

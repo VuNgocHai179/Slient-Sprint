@@ -35,8 +35,17 @@ namespace SilentSprint.UI
 
         public void OnPointerUp(PointerEventData eventData)
         {
+            ResetInput();
+        }
+
+        /// <summary>
+        /// Trả cần gạt về vị trí giữa. Dùng khi UI bị ẩn đột ngột (hội thoại, mini game)
+        /// vì lúc đó OnPointerUp không được gọi và cần gạt sẽ giữ nguyên hướng cũ.
+        /// </summary>
+        public void ResetInput()
+        {
             inputVector = Vector2.zero;
-            handle.anchoredPosition = Vector2.zero;
+            if (handle != null) handle.anchoredPosition = Vector2.zero;
         }
     }
 }

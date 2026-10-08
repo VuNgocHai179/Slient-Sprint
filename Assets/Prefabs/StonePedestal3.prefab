@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 4286894396566281429}
   - component: {fileID: 5780953323261356694}
   - component: {fileID: 8931549398573749188}
+  - component: {fileID: 7411776601000000003}
   m_Layer: 0
   m_Name: StonePedestal3
   m_TagString: Untagged
@@ -86,3 +87,18 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &7411776601000000003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1273448331177065417}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bb5971c46bf84a97ba60fb9883066723, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  minigameKind: 2
+  interactRadius: 12
+  isCompleted: 0
