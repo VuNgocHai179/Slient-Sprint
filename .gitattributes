@@ -1,0 +1,9 @@
+# Unity YAML không cần bị soi khoảng trắng cuối dòng.
+#
+# Trình tuần tự hoá của Unity ghi `m_Name: ` / `m_EditorClassIdentifier: ` (có dấu cách ở cuối)
+# cho các giá trị rỗng, nên mỗi lần lưu scene/prefab/asset là `git diff --check` lại báo lỗi ở
+# đúng những dòng đó. Đây là định dạng do Unity sinh ra, không phải lỗi của người viết code, và
+# Unity sẽ ghi lại y như cũ ở lần lưu sau — sửa tay cũng không giữ được.
+*.unity   -whitespace
+*.prefab  -whitespace
+*.asset   -whitespace

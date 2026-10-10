@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using SilentSprint.Core;
 using SilentSprint.UI;
 using DG.Tweening;
@@ -47,6 +49,15 @@ namespace SilentSprint.Gameplay
         private bool isRunning = false;
         private bool isSwiping = false;
         private bool wasGrounded = true;
+
+        /// <summary>
+        /// fingerId của những ngón tay đang bấm lên một điều khiển UI (cần gạt, nút nhảy...).
+        /// Ngón đó chỉ điều khiển UI, không được xoay camera.
+        /// </summary>
+        private readonly HashSet<int> lookBlockedFingers = new HashSet<int>();
+
+        /// <summary>Vùng đệm dùng lại cho raycast UI, tránh cấp phát mỗi lần ngón tay chạm xuống.</summary>
+        private static readonly List<RaycastResult> uiRaycastResults = new List<RaycastResult>();
 
         void Start()
         {
@@ -121,6 +132,10 @@ namespace SilentSprint.Gameplay
 
             bool isMoving = inputDir.magnitude > 0.1f;
 
+            // Tiếng chạy chỉ kêu khi THẬT SỰ đang chạy và đang di chuyển: giữ Shift mà đứng yên thì isRunning
+            // vẫn bật nhưng chân không bước, nên không có tiếng.
+            SetRunSound(isMoving && isRunning);
+
             if (isRunning && isMoving)
             {
                 currentStamina -= drainRate * Time.deltaTime;
@@ -184,22 +199,79 @@ namespace SilentSprint.Gameplay
                 lookY = Input.GetAxis("Mouse Y") * mouseSensitivity;
             }
 #else
-            foreach (Touch touch in Input.touches)
-            {
-                if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject(touch.fingerId)) continue;
-                if (touch.phase == TouchPhase.Moved)
-                {
-                    lookX = touch.deltaPosition.x * mouseSensitivity * 0.1f;
-                    lookY = touch.deltaPosition.y * mouseSensitivity * 0.1f;
-                    break;
-                }
-            }
+            ReadTouchLook(ref lookX, ref lookY);
 #endif
             cameraPitch -= lookY;
             cameraPitch = Mathf.Clamp(cameraPitch, -90f, 90f);
 
             playerCamera.localEulerAngles = Vector3.right * cameraPitch;
             transform.Rotate(Vector3.up * lookX);
+        }
+
+        /// <summary>
+        /// Vuốt để xoay camera, nhưng bỏ qua ngón tay đang dùng để bấm/kéo một điều khiển UI
+        /// (cần gạt, nút nhảy, nút chạy...). Một ngón tay được phân loại ngay lúc nó chạm xuống
+        /// và giữ nguyên phân loại đó cho tới khi nhấc lên: khi kéo cần gạt, ngón tay thường
+        /// trượt ra khỏi vùng UI, nếu cứ kiểm tra lại mỗi khung hình thì chính cú kéo cần gạt
+        /// lại xoay camera.
+        ///
+        /// Hàm này chỉ chạy trên thiết bị cảm ứng nhưng vẫn để ngoài #if để Editor cũng biên
+        /// dịch và kiểm tra được.
+        /// </summary>
+        private void ReadTouchLook(ref float lookX, ref float lookY)
+        {
+            int touchCount = Input.touchCount;
+
+            for (int i = 0; i < touchCount; i++)
+            {
+                Touch touch = Input.GetTouch(i);
+
+                if (touch.phase == TouchPhase.Began)
+                {
+                    if (IsTouchOnControl(touch.position)) lookBlockedFingers.Add(touch.fingerId);
+                    else lookBlockedFingers.Remove(touch.fingerId);
+                }
+                else if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+                {
+                    lookBlockedFingers.Remove(touch.fingerId);
+                }
+            }
+
+            for (int i = 0; i < touchCount; i++)
+            {
+                Touch touch = Input.GetTouch(i);
+
+                if (lookBlockedFingers.Contains(touch.fingerId)) continue;
+                if (touch.phase != TouchPhase.Moved) continue;
+
+                lookX = touch.deltaPosition.x * mouseSensitivity * 0.1f;
+                lookY = touch.deltaPosition.y * mouseSensitivity * 0.1f;
+                break;
+            }
+        }
+
+        /// <summary>
+        /// Điểm chạm có nằm trên một điều khiển UI thật sự hay không (cần gạt, nút bấm).
+        ///
+        /// Không dùng EventSystem.IsPointerOverGameObject cho việc này được: MainHUD phủ kín màn
+        /// hình bằng một Image trong suốt có bật Raycast Target, nên mọi điểm chạm đều "ở trên UI"
+        /// và phép kiểm tra đó không loại trừ được gì. Muốn biết cú chạm có bị UI lấy mất hay không
+        /// thì phải xem EventSystem có tìm được mục tiêu nhấn (IPointerDownHandler) từ điểm đó không.
+        /// </summary>
+        private static bool IsTouchOnControl(Vector2 screenPosition)
+        {
+            EventSystem eventSystem = EventSystem.current;
+            if (eventSystem == null) return false;
+
+            uiRaycastResults.Clear();
+            eventSystem.RaycastAll(new PointerEventData(eventSystem) { position = screenPosition }, uiRaycastResults);
+
+            if (uiRaycastResults.Count == 0) return false;
+
+            // EventSystem cũng chọn mục tiêu nhấn y hệt: lấy kết quả raycast trên cùng rồi đi
+            // ngược lên cha để tìm component xử lý PointerDown.
+            GameObject hit = uiRaycastResults[0].gameObject;
+            return hit != null && ExecuteEvents.GetEventHandler<IPointerDownHandler>(hit) != null;
         }
 
         public void Jump()
@@ -228,6 +300,25 @@ namespace SilentSprint.Gameplay
         {
             isRunning = false;
             if (camComponent != null) camComponent.DOFieldOfView(normalFOV, fovTweenTime).SetEase(Ease.OutCubic);
+        }
+
+        private void OnDisable()
+        {
+            // Bị khoá (hết ván, đoạn tỉnh dậy, đoạn kết) thì tiếng chân phải tắt theo, không thì nó kêu mãi.
+            AudioManager.StopRun();
+
+            // Lúc bị khoá, UI có thể bị ẩn nên không còn TouchPhase.Ended để dọn; tránh giữ lại
+            // fingerId cũ rồi hiểu nhầm ngón tay của lần chơi sau.
+            lookBlockedFingers.Clear();
+        }
+
+        /// <summary>
+        /// Bật/tắt tiếng chạy. Gọi mỗi khung hình cũng được, bên AudioManager tự bỏ qua khi đã đúng trạng thái.
+        /// </summary>
+        private static void SetRunSound(bool running)
+        {
+            if (running) AudioManager.StartRun();
+            else AudioManager.StopRun();
         }
 
         public void ToggleFlashlight()

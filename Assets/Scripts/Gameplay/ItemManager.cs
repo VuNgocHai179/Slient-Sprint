@@ -14,11 +14,23 @@ namespace SilentSprint.Gameplay
 
         public static event Action<int, int> OnFreedomStoneChanged;
 
+        [Header("Vật phẩm cần tìm (Item1)")]
+        [Tooltip("Tổng số vật phẩm phải tìm trong màn. Bằng số tượng thiên thần sa ngã: mỗi tượng thưởng một vật phẩm.")]
+        public int maxQuestItems = 3;
+        public int currentQuestItems = 0;
+
+        /// <summary>Số vật phẩm cần tìm đã thu được thay đổi (đã có, tổng số).</summary>
+        public static event Action<int, int> OnQuestItemChanged;
+
         [Header("Spawn Locations")]
         public List<Transform> spawnPoints;
 
         void Start()
         {
+            // Vào màn bằng Continue thì bản lưu dựng lại đúng chỗ đá cũ (xem GameplaySaveManager),
+            // không chia ngẫu nhiên chồng lên nữa.
+            if (GameSave.IsRestoring) return;
+
             SpawnItemsRandomly();
         }
 
@@ -64,6 +76,22 @@ namespace SilentSprint.Gameplay
             if (currentFreedomStones >= maxFreedomStones)
             {
                 Debug.Log("DONE FreedomStone!");
+            }
+        }
+
+        /// <summary>
+        /// Cộng vật phẩm cần tìm (Item1). Tượng thiên thần sa ngã thưởng vật phẩm theo đường này:
+        /// vật phẩm bay vào tới người chơi rồi mới gọi vào đây, nên bộ đếm trên HUD nhích lên đúng lúc vật phẩm nhập vào người.
+        /// </summary>
+        public void CollectQuestItem(int amount = 1)
+        {
+            currentQuestItems = Mathf.Clamp(currentQuestItems + amount, 0, maxQuestItems);
+
+            OnQuestItemChanged?.Invoke(currentQuestItems, maxQuestItems);
+
+            if (currentQuestItems >= maxQuestItems)
+            {
+                Debug.Log("DONE QuestItem!");
             }
         }
     }

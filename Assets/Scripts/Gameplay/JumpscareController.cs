@@ -3,7 +3,6 @@ using UnityEngine;
 using UnityEngine.UI;
 using DG.Tweening;
 using SilentSprint.Core;
-using UnityEngine.SceneManagement;
 
 namespace SilentSprint.Gameplay
 {
@@ -19,6 +18,9 @@ namespace SilentSprint.Gameplay
         public GameObject mainHUD;
         public Image scaryBloodOverlay;
         public CanvasGroup gameOverPanel;
+
+        [Tooltip("Nút chơi lại trên bảng Game Over. Để trống thì bảng hiện ra mà không bấm được gì.")]
+        public Button btnReplay;
 
         [Header("Timing & Game Feel")]
         private float turnDuration = 0.22f;
@@ -49,11 +51,21 @@ namespace SilentSprint.Gameplay
                 gameOverPanel.alpha = 0f;
                 gameOverPanel.gameObject.SetActive(false);
             }
+
+            if (btnReplay != null)
+            {
+                btnReplay.onClick.RemoveAllListeners();
+                btnReplay.onClick.AddListener(RestartGame);
+            }
         }
 
         public void TriggerCaughtJumpscare(Vector3 monsterWorldPosition, GameObject realMonster)
         {
             if (isScaring) return;
+
+            // Bị tóm là mất ván: xoá bản lưu để bảng chính không còn nút Continue.
+            if (GameplaySaveManager.Instance != null) GameplaySaveManager.Instance.NotifyRunLost();
+
             StartCoroutine(ExecuteCaughtSequence(monsterWorldPosition, realMonster));
         }
 
@@ -95,6 +107,9 @@ namespace SilentSprint.Gameplay
             }
 
             yield return new WaitForSeconds(turnDuration);
+
+            // Tiếng hét vang lên đúng nhịp con quái lao vào mặt, cùng lúc camera bắt đầu rung ở dưới.
+            AudioManager.PlayJumpscare();
 
             if (realMonster != null)
             {
@@ -158,7 +173,7 @@ namespace SilentSprint.Gameplay
         public void RestartGame()
         {
             DOTween.KillAll();
-            SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+            SceneFlow.Reload();
         }
     }
 }

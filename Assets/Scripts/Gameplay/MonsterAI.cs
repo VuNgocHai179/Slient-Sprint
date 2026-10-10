@@ -1,8 +1,24 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
+using SilentSprint.Gameplay.AI;
 
 namespace SilentSprint.Gameplay
 {
+    /// <summary>
+    /// AI cua quai, kien truc HYBRID hai lop:
+    ///
+    ///   LOP QUYET DINH - <see cref="MonsterBrain"/> (model ONNX qua Inference Engine)
+    ///       Quyet dinh nen Patrol / Investigate / Chase, va 4 tham so tinh cach
+    ///       (aggression, searchRadius, flank, alertness). Chay o 10Hz.
+    ///
+    ///   LOP PHAN XA - chinh file nay
+    ///       Cac luat cung luon thang model: khoang cach bat duoc, nhin thay o cu ly sat,
+    ///       tieng dong ngay canh, va cac "chan doan an toan" (khong the duoi thu no khong biet).
+    ///       Nho vay model co the "ngoc" ma game khong vo.
+    ///
+    /// NavMeshAgent van chiu trach nhiem tim duong; brain chi chon muc tieu va sac thai.
+    /// </summary>
     [RequireComponent(typeof(NavMeshAgent))]
     public class MonsterAI : MonoBehaviour
     {
@@ -23,22 +39,91 @@ namespace SilentSprint.Gameplay
         public float hearingDistance = 25f;
         public float eyeHeight = 2.5f;
         public float catchDistance = 1.6f;
+        [Tooltip("Layer cua cac VAT CAN tam nhin (tuong, cua, dia hinh) - vi du Default | Obstacle. " +
+                 "KHONG duoc chua layer Player: tia kiem tra di tu mat quai toi player, de Player trong mask " +
+                 "thi tia luon dung ngay tren nguoi player va quai khong bao gio thay gi.")]
         public LayerMask obstacleMask;
+
+        [Header("Brain (ONNX / Inference Engine)")]
+        [Tooltip("Bo trong thi tu tim MonsterBrain tren cung GameObject, neu khong co thi tu them vao. " +
+                 "Khi do file Assets/Resources/MonsterBrain/monster_brain.onnx se duoc nap tu dong.")]
+        public MonsterBrain brain;
+
+        [Header("Leo thang theo tien do (manh da tu do)")]
+        [Tooltip("Quai khon dan theo so manh da tu do nguoi choi nhat duoc: xem MonsterEscalation. " +
+                 "Chi nang GIAC QUAN va Y DINH cua brain, khong dung toi toc do.")]
+        public MonsterEscalation escalation = new MonsterEscalation();
+
+        [Header("Reflex Layer (luon thang quyet dinh cua brain)")]
+        [Tooltip("Thay player trong khoang sightDistance * he so nay thi bat buoc chuyen sang Chase.")]
+        [Range(0f, 1f)]
+        public float pointBlankChaseFactor = 0.4f;
+
+        [Tooltip("Nghe tieng dong trong khoang hearingDistance * he so nay thi it nhat cung phai Investigate.")]
+        [Range(0f, 1f)]
+        public float closeAudibleRange = 0.5f;
+
+        [Tooltip("Bien do uu tien doi trang thai. Cang cao thi quai cang i 'do du' truoc khi doi muc tieu.")]
+        [Range(0f, 1f)]
+        public float stateSwitchMargin = 0.15f;
+
+        [Header("Search Behaviour")]
+        [Tooltip("Ban kinh toi da (met) cua vong luc soat quanh vi tri nho duoc, nhan voi searchRadius cua brain.")]
+        public float maxSearchRadius = 12f;
+        public float searchDurationMin = 3f;
+        public float searchDurationMax = 8f;
+
+        [Header("Chase Behaviour")]
+        [Tooltip("So giay du doan ve phia truoc theo van toc player khi brain yeu cau cat duong.")]
+        public float flankPredictionTime = 1.2f;
+
+        [Tooltip("Toc do duoi bi kep khong vuot qua runSpeed cua nguoi choi nhan he so nay. " +
+                 "Phai nho hon 1: day la 'cua thoat' bat buoc, nguoi choi bam chay het toc la phai bo xa duoc quai. " +
+                 "Tran nay manh hon ca chaseSpeed lan moi bac leo thang.")]
+        [Range(0.5f, 1f)]
+        public float maxChaseSpeedToPlayerRunRatio = 0.85f;
+
+        [Header("Patrol")]
+        public float patrolWaitTime = 2f;
+
+        [Header("Debug")]
+        public bool logStateChanges;
+        public bool logBrainDecision;
 
         private NavMeshAgent agent;
         private Animator animator;
         private PlayerController playerController;
 
-        private Vector3 investigateTarget;
-        private float waitTimer = 0f;
-        private float patrolWaitTime = 2f;
-        private bool hasCaughtPlayer = false;
+        private readonly MonsterPerception perception = new MonsterPerception();
 
-        void Start()
+        private Vector3 investigateTarget;
+        private float waitTimer;
+        private float searchTimer;
+        private bool isSearching;
+        private bool hasCaughtPlayer;
+
+        /// <summary>Hội thoại đang mở nên quái bị đóng băng (xem <see cref="Pause"/>).</summary>
+        public bool IsPaused { get; private set; }
+
+        private void Awake()
         {
             agent = GetComponent<NavMeshAgent>();
             animator = GetComponent<Animator>();
 
+            if (brain == null) brain = GetComponent<MonsterBrain>();
+            if (brain == null)
+            {
+                brain = gameObject.AddComponent<MonsterBrain>();
+                Debug.Log("[MonsterAI] Chua co MonsterBrain tren prefab - da tu them vao luc chay. " +
+                          "Them component nay vao prefab de cau hinh duoc trong Inspector.", this);
+            }
+
+            // Chi bat them khi nguoi dung yeu cau tu MonsterAI; khong ghi de cau hinh san co tren MonsterBrain.
+            if (logBrainDecision) brain.logDecisions = true;
+        }
+
+        private void Start()
+        {
             if (player == null)
             {
                 playerController = FindAnyObjectByType<PlayerController>();
@@ -55,14 +140,37 @@ namespace SilentSprint.Gameplay
             {
                 playerController = player.GetComponent<PlayerController>();
             }
+
+            SyncPerceptionSettings();
+            perception.Bind(playerController);
+
+            if (brain != null && !brain.IsInitialised)
+                brain.Initialise();
+
+            if (logBrainDecision)
+            {
+                Debug.Log(string.Format("[MonsterAI] Nguon quyet dinh: {0}",
+                    brain != null && brain.IsModelDriven ? "ONNX model (Inference Engine)" : "chinh sach viet tay"), this);
+            }
         }
 
-        void Update()
+        private void Update()
         {
+            // Hội thoại đang mở: đóng băng quái để người chơi không bị tóm trong lúc đọc.
+            if (IsPaused) return;
+
             if (player == null || hasCaughtPlayer) return;
 
+            RefreshEscalation();
+            SyncPerceptionSettings();
+            perception.Bind(playerController);
+            perception.Sample(transform, brain != null ? brain.Decision.Alertness : 0.25f, Time.deltaTime);
+
+            if (brain != null)
+                brain.Tick(BuildObservation(), Time.deltaTime);
+
+            UpdateStateFromDecision();
             UpdateAnimation();
-            CheckSenses();
 
             switch (currentState)
             {
@@ -78,61 +186,285 @@ namespace SilentSprint.Gameplay
             }
         }
 
-        private void CheckSenses()
+        // ------------------------------------------------------------------ Dong bang
+
+        /// <summary>
+        /// Đóng băng quái: dừng NavMeshAgent và tư thế đi, nhưng giữ nguyên đường đang đi
+        /// nên <see cref="Resume"/> xong quái tiếp tục như cũ. Cũng chặn luôn
+        /// MonsterBrain.Tick vì Tick được gọi từ Update.
+        /// </summary>
+        public void Pause()
         {
-            float distanceToPlayer = Vector3.Distance(transform.position, player.position);
+            if (IsPaused) return;
 
-            // 1. VISUAL CHECK
-            if (distanceToPlayer <= sightDistance)
+            IsPaused = true;
+
+            if (agent != null && agent.isOnNavMesh)
             {
-                Vector3 directionToPlayer = (player.position - transform.position).normalized;
-                float angle = Vector3.Angle(transform.forward, directionToPlayer);
-
-                if (angle < sightAngle)
-                {
-                    Vector3 eyePosition = transform.position + Vector3.up * eyeHeight;
-
-                    if (!Physics.Raycast(eyePosition, directionToPlayer, distanceToPlayer, obstacleMask))
-                    {
-                        currentState = MonsterState.Chase;
-                        return;
-                    }
-                }
+                agent.isStopped = true;
+                agent.velocity = Vector3.zero;
             }
 
-            // 2. HEARING CHECK
-            if (currentState != MonsterState.Chase && distanceToPlayer <= hearingDistance)
+            if (animator != null)
             {
-                Animator playerAnim = player.GetComponentInChildren<Animator>();
-                if (playerAnim != null && playerAnim.GetBool("isRunning"))
-                {
-                    investigateTarget = player.position;
-                    currentState = MonsterState.Investigate;
-                }
-            }
-
-            // 3. LOSING THE TARGET
-            if (currentState == MonsterState.Chase && distanceToPlayer > sightDistance * 1.5f)
-            {
-                currentState = MonsterState.Investigate;
-                investigateTarget = player.position;
+                animator.SetBool("isWalking", false);
+                animator.speed = 1f;
             }
         }
 
+        /// <summary>Cho quái chạy tiếp sau khi hết đóng băng.</summary>
+        public void Resume()
+        {
+            if (!IsPaused) return;
+
+            IsPaused = false;
+
+            if (agent != null && agent.isOnNavMesh)
+                agent.isStopped = false;
+        }
+
+        // Quái đã bị PauseAll đóng băng, để ResumeAll chỉ thả đúng những con đó.
+        private static readonly List<MonsterAI> FrozenByAll = new List<MonsterAI>();
+
+        /// <summary>
+        /// Đóng băng toàn bộ quái đang hoạt động trong scene. Gọi khi hội thoại mở hoặc khi
+        /// vào mini game — lúc người chơi không điều khiển được nhân vật.
+        /// </summary>
+        public static void PauseAll()
+        {
+            FrozenByAll.RemoveAll(monster => monster == null);
+
+            MonsterAI[] monsters = FindObjectsByType<MonsterAI>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+
+            for (int i = 0; i < monsters.Length; i++)
+            {
+                if (monsters[i] == null || monsters[i].IsPaused) continue;
+
+                monsters[i].Pause();
+                FrozenByAll.Add(monsters[i]);
+            }
+        }
+
+        /// <summary>Thả đúng những con quái đã bị <see cref="PauseAll"/> đóng băng.</summary>
+        public static void ResumeAll()
+        {
+            for (int i = 0; i < FrozenByAll.Count; i++)
+            {
+                if (FrozenByAll[i] != null) FrozenByAll[i].Resume();
+            }
+
+            FrozenByAll.Clear();
+        }
+
+        // ------------------------------------------------------------------ Giac quan
+
+        /// <summary>
+        /// Đọc lại số mảnh đá tự do và cập nhật bậc leo thang. Gọi trước
+        /// <see cref="SyncPerceptionSettings"/> để mọi chỉ số trong frame này đã theo bậc mới.
+        /// </summary>
+        private void RefreshEscalation()
+        {
+            int stones = ItemManager.Instance != null ? ItemManager.Instance.currentFreedomStones : 0;
+            int previousTier = escalation.Tier;
+            escalation.Refresh(stones);
+
+            if (escalation.Tier == previousTier || !logStateChanges) return;
+
+            Debug.Log(string.Format(
+                "[MonsterAI] Leo thang len bac {0} ({1}/{2} manh da): tam nhin x{3:F2}, tam nghe x{4:F2}, " +
+                "goc nhin +{5:F0} do, san y dinh {6:F2}, nguong doi trang thai {7:F2}.",
+                escalation.Tier, stones, ItemManager.Instance != null ? ItemManager.Instance.maxFreedomStones : 0,
+                escalation.SightMultiplier, escalation.HearingMultiplier, escalation.SightAngleBonus,
+                escalation.IntentFloor, ResolveStateSwitchMargin()), this);
+        }
+
+        /// <summary>
+        /// Kéo một tham số tính cách của brain lên sàn của bậc leo thang hiện tại. Brain trả về
+        /// thấp hơn sàn thì quái vẫn hành xử ráo riết như bậc đã yêu cầu.
+        /// </summary>
+        private float IntentFloor(float value)
+        {
+            return Mathf.Clamp01(escalation.ApplyIntentFloor(value));
+        }
+
+        /// <summary>Ngưỡng ưu tiên khi đổi trạng thái, đã trừ đi phần leo thang.</summary>
+        private float ResolveStateSwitchMargin()
+        {
+            return Mathf.Clamp(stateSwitchMargin + escalation.StateSwitchMarginOffset, 0f, 1f);
+        }
+
+        private void SyncPerceptionSettings()
+        {
+            perception.SightDistance = sightDistance * escalation.SightMultiplier;
+            perception.SightAngle = sightAngle + escalation.SightAngleBonus;
+            perception.EyeHeight = eyeHeight;
+            perception.HearingDistance = hearingDistance * escalation.HearingMultiplier;
+            perception.StalkRadius = stalkRadius;
+            perception.ObstacleMask = obstacleMask;
+        }
+
+        private MonsterObservation BuildObservation()
+        {
+            float sight = Mathf.Max(0.001f, perception.EffectiveSightDistance);
+            float hear = Mathf.Max(0.001f, perception.HearingDistance);
+            float runReference = Mathf.Max(0.001f, perception.RunSpeedReference);
+
+            var observation = new MonsterObservation();
+            observation.DistNorm = Mathf.Clamp(perception.DistanceToPlayer / sight, 0f, 2f);
+            observation.AngleNorm = Mathf.Clamp01(perception.AngleToPlayer / 180f);
+            observation.LosClear = perception.LineOfSightClear ? 1f : 0f;
+            observation.InSightCone = perception.InSightCone ? 1f : 0f;
+            observation.RelDirX = perception.RelativeDirection.x;
+            observation.RelDirZ = perception.RelativeDirection.z;
+            observation.PlayerSpeedNorm = Mathf.Clamp01(perception.PlayerSpeed / runReference);
+            observation.PlayerNoise = Mathf.Clamp01(perception.PlayerNoise);
+            observation.StaminaNorm = Mathf.Clamp01(perception.PlayerStaminaNorm);
+            observation.FlashlightOn = perception.FlashlightOn ? 1f : 0f;
+            observation.Proximity = Mathf.Clamp01(perception.DistanceToPlayer / hear);
+            observation.TimeSinceSeen = perception.TimeSinceLastSeenNormalized;
+            observation.HasLastKnown = perception.HasLastKnownPosition ? 1f : 0f;
+            observation.LastKnownDist = perception.HasLastKnownPosition
+                ? Mathf.Clamp(Vector3.Distance(transform.position, perception.LastKnownPosition) /
+                              Mathf.Max(1f, stalkRadius), 0f, 1.5f)
+                : 0f;
+            observation.PrevState = (float)currentState / 2f;
+            return observation;
+        }
+
+        // ------------------------------------------------------------------ Quyet dinh + phan xa
+
+        private void UpdateStateFromDecision()
+        {
+            SetState(ResolveDecisionState());
+
+            // --- LOP PHAN XA -----------------------------------------------------------------
+            // Cac luat duoi day khong the bi model ghi de, va chay sau cung nen luon thang.
+            bool veryClose = perception.DistanceToPlayer <= catchDistance * 3f;
+            bool pointBlank = perception.DistanceToPlayer <= perception.SightDistance * pointBlankChaseFactor;
+
+            if (perception.PlayerVisible && (veryClose || pointBlank))
+            {
+                SetState(MonsterState.Chase);
+            }
+            else if (perception.PlayerHeard &&
+                     perception.DistanceToPlayer <= perception.HearingDistance * closeAudibleRange &&
+                     currentState == MonsterState.Patrol)
+            {
+                SetState(MonsterState.Investigate);
+            }
+        }
+
+        /// <summary>
+        /// Doi quyet dinh tho cua brain thanh trang thai FSM, sau khi da loc bo cac lua chon
+        /// khong the xay ra ("chan doan an toan") va ap dung do tre doi trang thai.
+        /// </summary>
+        private MonsterState ResolveDecisionState()
+        {
+            if (brain == null) return currentState;
+
+            MonsterDecision decision = brain.Decision;
+
+            float patrol = Mathf.Clamp01(decision.PatrolProbability);
+            float investigate = Mathf.Clamp01(decision.InvestigateProbability);
+            float chase = Mathf.Clamp01(decision.ChaseProbability);
+
+            // Chan doan an toan: khong the chon duoi mot thu ma no khong nhin thay.
+            if (!perception.PlayerVisible)
+            {
+                chase = 0f;
+                if (!perception.HasLastKnownPosition && !perception.PlayerHeard)
+                    investigate = 0f;
+            }
+
+            int bestIndex = MonsterBrainOutputLayout.StatePatrol;
+            float best = patrol;
+            if (investigate > best)
+            {
+                best = investigate;
+                bestIndex = MonsterBrainOutputLayout.StateInvestigate;
+            }
+            if (chase > best)
+            {
+                best = chase;
+                bestIndex = MonsterBrainOutputLayout.StateChase;
+            }
+
+            var bestState = (MonsterState)bestIndex;
+
+            // Do tre doi trang thai: tranh rung lac khi hai lua chon xap xi nhau.
+            // Bac leo thang cang cao thi nguong nay cang thap, de quai phan ung som hon.
+            if (bestState != currentState)
+            {
+                float incumbent = ProbabilityForState(patrol, investigate, chase, currentState);
+                if (best < incumbent + ResolveStateSwitchMargin())
+                    return currentState;
+            }
+
+            return bestState;
+        }
+
+        private static float ProbabilityForState(float patrol, float investigate, float chase, MonsterState state)
+        {
+            switch (state)
+            {
+                case MonsterState.Investigate: return investigate;
+                case MonsterState.Chase: return chase;
+                default: return patrol;
+            }
+        }
+
+        private void SetState(MonsterState next)
+        {
+            if (next == currentState) return;
+
+            MonsterState previous = currentState;
+            currentState = next;
+
+            waitTimer = 0f;
+            isSearching = false;
+
+            switch (next)
+            {
+                case MonsterState.Investigate:
+                    investigateTarget = perception.HasLastKnownPosition
+                        ? perception.LastKnownPosition
+                        : player.position;
+                    searchTimer = Mathf.Lerp(searchDurationMin, searchDurationMax,
+                        brain != null ? IntentFloor(brain.Decision.Alertness) : 0.25f);
+                    SearchFromHere();
+                    break;
+
+                case MonsterState.Chase:
+                    agent.isStopped = false;
+                    break;
+            }
+
+            if (logStateChanges)
+                Debug.Log(string.Format("[MonsterAI] {0} -> {1}", previous, next), this);
+        }
+
+        // ------------------------------------------------------------------ Hanh vi
+
         private void PatrolBehavior()
         {
-            agent.speed = patrolSpeed;
+            float aggression = brain != null ? IntentFloor(brain.Decision.Aggression) : 0.2f;
+            agent.isStopped = false;
+            agent.speed = Mathf.Lerp(patrolSpeed * 0.8f, patrolSpeed, aggression);
 
             if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
             {
                 waitTimer += Time.deltaTime;
                 if (waitTimer >= patrolWaitTime)
                 {
-                    Vector3 randomDirection = Random.insideUnitSphere * stalkRadius;
-                    randomDirection += player.position;
+                    // Di tuan quanh player, nhung lech ve phia lan cuoi con thay player.
+                    Vector3 anchor = perception.HasLastKnownPosition
+                        ? Vector3.Lerp(player.position, perception.LastKnownPosition, 0.5f)
+                        : player.position;
 
-                    NavMeshHit hit;
-                    if (NavMesh.SamplePosition(randomDirection, out hit, stalkRadius, NavMesh.AllAreas))
+                    Vector3 randomDirection = Random.insideUnitSphere * stalkRadius;
+                    randomDirection += anchor;
+
+                    if (NavMesh.SamplePosition(randomDirection, out NavMeshHit hit, stalkRadius, NavMesh.AllAreas))
                     {
                         agent.SetDestination(hit.position);
                     }
@@ -143,15 +475,47 @@ namespace SilentSprint.Gameplay
 
         private void InvestigateBehavior()
         {
-            agent.speed = patrolSpeed;
-            agent.SetDestination(investigateTarget);
+            float aggression = brain != null ? IntentFloor(brain.Decision.Aggression) : 0.2f;
+            agent.isStopped = false;
+            agent.speed = Mathf.Lerp(patrolSpeed * 0.85f, patrolSpeed * 1.35f, aggression);
+
+            if (!isSearching)
+            {
+                // Con dang tren duong toi cho nguoi ta thay lan cuoi.
+                if (perception.HasLastKnownPosition && perception.TimeSinceLastSeen < 0.5f)
+                {
+                    investigateTarget = perception.LastKnownPosition;
+                    agent.SetDestination(investigateTarget);
+                }
+
+                if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
+                {
+                    isSearching = true;
+                    waitTimer = 0f;
+                }
+                return;
+            }
+
+            // Pha luc soat: di loan quanh vi tri cuoi trong ban kinh ty le voi searchRadius.
+            searchTimer -= Time.deltaTime;
+            if (searchTimer <= 0f)
+            {
+                SetState(MonsterState.Patrol);
+                return;
+            }
 
             if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
             {
                 waitTimer += Time.deltaTime;
-                if (waitTimer >= 3f)
+                if (waitTimer >= 1f)
                 {
-                    currentState = MonsterState.Patrol;
+                    float radius = Mathf.Max(2f, IntentFloor(brain.Decision.SearchRadius) * maxSearchRadius);
+                    Vector3 candidate = investigateTarget + Random.insideUnitSphere * radius;
+                    candidate.y = investigateTarget.y;
+
+                    if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, radius, NavMesh.AllAreas))
+                        agent.SetDestination(hit.position);
+
                     waitTimer = 0f;
                 }
             }
@@ -159,14 +523,52 @@ namespace SilentSprint.Gameplay
 
         private void ChaseBehavior()
         {
-            agent.speed = chaseSpeed;
-            agent.SetDestination(player.position);
+            float aggression = brain != null ? IntentFloor(brain.Decision.Aggression) : 1f;
+            float flank = brain != null ? IntentFloor(brain.Decision.Flank) : 0f;
 
-            float distanceToPlayer = Vector3.Distance(transform.position, player.position);
-            if (distanceToPlayer <= catchDistance)
+            agent.isStopped = false;
+            agent.speed = MaxChaseSpeed(aggression);
+
+            Vector3 destination = player.position;
+
+            // Cat duong: doan truoc vi tri player theo van toc hien tai.
+            if (flank > 0.35f && perception.PlayerVelocity.sqrMagnitude > 0.01f)
+            {
+                destination += perception.PlayerVelocity * (flankPredictionTime * flank);
+                if (NavMesh.SamplePosition(destination, out NavMeshHit hit, 4f, NavMesh.AllAreas))
+                    destination = hit.position;
+            }
+
+            agent.SetDestination(destination);
+
+            if (perception.DistanceToPlayer <= catchDistance)
             {
                 CatchPlayer();
             }
+        }
+
+        /// <summary>
+        /// Tốc độ khi đuổi, đã kẹp theo tốc độ chạy của người chơi.
+        ///
+        /// Vì sao phải kẹp: <see cref="chaseSpeed"/> một mình có thể lớn hơn <c>runSpeed</c> của
+        /// <see cref="PlayerController"/>, và khi đó người chơi có bị phát hiện là hết đường —
+        /// có chạy hết tốc cũng chỉ chậm hơn mà thôi. Trần này bảo đảm người chơi luôn bỏ xa được quái,
+        /// nên muốn thoát thì phải chạy (tốn thể lực) rồi cắt tầm nhìn, chứ không phải đứng yên chịu trận.
+        /// Trần được tính lại mỗi frame nên đổi <c>runSpeed</c> lúc chạy cũng ăn ngay.
+        /// </summary>
+        /// <param name="aggression">Ý định hung hăng 0..1 của brain, đã qua <see cref="IntentFloor"/>.</param>
+        private float MaxChaseSpeed(float aggression)
+        {
+            float playerRunSpeed = playerController != null
+                ? playerController.runSpeed
+                : perception.RunSpeedReference;
+
+            float wanted = Mathf.Lerp(patrolSpeed, chaseSpeed, aggression);
+            if (playerRunSpeed <= 0f) return wanted;
+
+            // Kep he so <= 1 lan nua de du prefab/asset con giu gia tri cu thi 'cua thoat' van con.
+            float ratio = Mathf.Clamp(maxChaseSpeedToPlayerRunRatio, 0.1f, 1f);
+            return Mathf.Min(wanted, playerRunSpeed * ratio);
         }
 
         private void CatchPlayer()
@@ -204,23 +606,70 @@ namespace SilentSprint.Gameplay
             }
         }
 
+        private void SearchFromHere()
+        {
+            if (!agent.isOnNavMesh)
+                return;
+
+            if (NavMesh.SamplePosition(investigateTarget, out NavMeshHit hit, stalkRadius, NavMesh.AllAreas))
+                agent.SetDestination(hit.position);
+            else
+                agent.SetDestination(investigateTarget);
+        }
+
+        // ------------------------------------------------------------------ Gizmos
+
         private void OnDrawGizmosSelected()
         {
+            // Vẽ theo chỉ số ĐÃ leo thang để nhìn là biết quái đang ở bậc nào.
+            float effectiveSight = sightDistance * escalation.SightMultiplier;
+            float effectiveAngle = sightAngle + escalation.SightAngleBonus;
+            float effectiveHearing = hearingDistance * escalation.HearingMultiplier;
+
             Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(transform.position, sightDistance);
+            Gizmos.DrawWireSphere(transform.position, effectiveSight);
 
             Vector3 eyePosition = transform.position + Vector3.up * eyeHeight;
-            Vector3 leftBoundary = Quaternion.Euler(0, -sightAngle, 0) * transform.forward;
-            Vector3 rightBoundary = Quaternion.Euler(0, sightAngle, 0) * transform.forward;
+            Vector3 leftBoundary = Quaternion.Euler(0, -effectiveAngle, 0) * transform.forward;
+            Vector3 rightBoundary = Quaternion.Euler(0, effectiveAngle, 0) * transform.forward;
 
             Gizmos.color = Color.blue;
-            Gizmos.DrawRay(eyePosition, leftBoundary * sightDistance);
-            Gizmos.DrawRay(eyePosition, rightBoundary * sightDistance);
+            Gizmos.DrawRay(eyePosition, leftBoundary * effectiveSight);
+            Gizmos.DrawRay(eyePosition, rightBoundary * effectiveSight);
+
+            Gizmos.color = new Color(1f, 0.5f, 0f, 0.35f);
+            Gizmos.DrawWireSphere(transform.position, effectiveHearing);
 
             if (player != null)
             {
                 Gizmos.color = Color.red;
                 Gizmos.DrawLine(eyePosition, player.position + Vector3.up);
+            }
+
+            // Chi hien khi dang chay de thay brain dang lam gi.
+            if (!Application.isPlaying) return;
+
+            if (perception.HasLastKnownPosition)
+            {
+                Gizmos.color = Color.magenta;
+                Gizmos.DrawWireSphere(perception.LastKnownPosition, 0.6f);
+                Gizmos.DrawLine(transform.position + Vector3.up, perception.LastKnownPosition + Vector3.up);
+            }
+
+            if (currentState == MonsterState.Investigate)
+            {
+                Gizmos.color = new Color(1f, 1f, 0f, 0.25f);
+                float radius = brain != null
+                    ? Mathf.Max(2f, IntentFloor(brain.Decision.SearchRadius) * maxSearchRadius)
+                    : maxSearchRadius;
+                Gizmos.DrawWireSphere(investigateTarget, radius);
+            }
+
+            if (currentState == MonsterState.Chase && perception.PlayerVelocity.sqrMagnitude > 0.01f)
+            {
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawLine(player.position,
+                    player.position + perception.PlayerVelocity * flankPredictionTime);
             }
         }
     }

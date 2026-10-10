@@ -3,6 +3,7 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using TMPro;
 using SilentSprint.Gameplay;
+using SilentSprint.UI.Dialogs;
 
 namespace SilentSprint.UI
 {
@@ -13,11 +14,22 @@ namespace SilentSprint.UI
         public GameObject btnRun;
         public Button btnFlashlight;
 
+        [Header("La bàn")]
+        [Tooltip("Nút bật/tắt la bàn trên MainHUD. Chỉ hiện sau khi người chơi nhận được la bàn.")]
+        public Button btnCompass;
+
+        [Header("Tạm dừng")]
+        [Tooltip("Nút tạm dừng trên MainHUD, mở bảng DlgPause.")]
+        public Button btnPause;
+
         [Header("Status UI")]
         public Image imgStamina;
 
         [Header("Item Counter UI")]
         public TextMeshProUGUI txtFreedomStone;
+
+        [Tooltip("Bộ đếm vật phẩm cần tìm (Item1) trên MainHUD, dạng 'đã có/tổng'. Mỗi tượng thiên thần thưởng một vật phẩm.")]
+        public TextMeshProUGUI txtQuestItem;
 
         private PlayerController player;
 
@@ -28,21 +40,26 @@ namespace SilentSprint.UI
             SetupJumpButton();
             SetupRunButton();
             SetupFlashlightButton();
+            SetupCompassButton();
+            SetupPauseButton();
 
             if (ItemManager.Instance != null)
             {
                 UpdateFreedomStoneDisplay(ItemManager.Instance.currentFreedomStones, ItemManager.Instance.maxFreedomStones);
+                UpdateQuestItemDisplay(ItemManager.Instance.currentQuestItems, ItemManager.Instance.maxQuestItems);
             }
         }
 
         void OnEnable()
         {
             ItemManager.OnFreedomStoneChanged += UpdateFreedomStoneDisplay;
+            ItemManager.OnQuestItemChanged += UpdateQuestItemDisplay;
         }
 
         void OnDisable()
         {
             ItemManager.OnFreedomStoneChanged -= UpdateFreedomStoneDisplay;
+            ItemManager.OnQuestItemChanged -= UpdateQuestItemDisplay;
         }
 
         public void UpdateFreedomStoneDisplay(int current, int max)
@@ -50,6 +67,14 @@ namespace SilentSprint.UI
             if (txtFreedomStone != null)
             {
                 txtFreedomStone.text = $"{current}/{max}";
+            }
+        }
+
+        public void UpdateQuestItemDisplay(int current, int max)
+        {
+            if (txtQuestItem != null)
+            {
+                txtQuestItem.text = $"{current}/{max}";
             }
         }
 
@@ -116,6 +141,59 @@ namespace SilentSprint.UI
                     if (player != null) player.ToggleFlashlight();
                 });
             }
+        }
+
+        /// <summary>Bật/tắt nút BtnCompass. Nút này chỉ hiện sau khi người chơi nhận được la bàn.</summary>
+        public void SetCompassButtonVisible(bool visible)
+        {
+            if (btnCompass == null) return;
+
+            if (btnCompass.gameObject.activeSelf != visible)
+            {
+                btnCompass.gameObject.SetActive(visible);
+            }
+        }
+
+        private void SetupCompassButton()
+        {
+            if (btnCompass == null)
+            {
+                // Có thể chưa gán tay trong Inspector: tìm luôn nút cùng tên nằm trên MainHUD.
+                Transform found = transform.Find("BtnCompass");
+                if (found != null) btnCompass = found.GetComponent<Button>();
+            }
+
+            if (btnCompass == null) return;
+
+            btnCompass.onClick.RemoveAllListeners();
+            btnCompass.onClick.AddListener(() =>
+            {
+                if (CompassSystem.Instance != null) CompassSystem.Instance.ToggleCompass();
+            });
+
+            // Chưa nhặt đủ mảnh đá thì chưa có la bàn, nút phải ẩn đi.
+            if (CompassSystem.Instance == null || !CompassSystem.Instance.IsUnlocked)
+            {
+                SetCompassButtonVisible(false);
+            }
+        }
+
+        private void SetupPauseButton()
+        {
+            if (btnPause == null)
+            {
+                // Có thể chưa gán tay trong Inspector: tìm luôn nút cùng tên nằm trên MainHUD.
+                Transform found = transform.Find("btn_Pause");
+                if (found != null) btnPause = found.GetComponent<Button>();
+            }
+
+            if (btnPause == null) return;
+
+            btnPause.onClick.RemoveAllListeners();
+            btnPause.onClick.AddListener(() =>
+            {
+                if (DialogManager.Instance != null) DialogManager.Instance.Toggle<PauseDialog>();
+            });
         }
     }
 }
