@@ -187,6 +187,18 @@ namespace SilentSprint.Gameplay
             compass.ToggleVisible();
         }
 
+        /// <summary>La bàn đang lộ ra trước mặt người chơi không (cảnh kết hỏi trước khi cất đi).</summary>
+        public bool IsCompassVisible => compass != null && compass.IsVisible;
+
+        /// <summary>
+        /// Cất la bàn đi hoặc lấy ra. Cảnh kết dùng để cất la bàn đang mở: la bàn là con của người chơi nên cứ lơ
+        /// lửng trước mặt suốt đoạn phim.
+        /// </summary>
+        public void SetCompassVisible(bool visible)
+        {
+            if (compass != null) compass.SetVisible(visible);
+        }
+
         private void ShowCompassButton()
         {
             if (compassButtonShown) return;

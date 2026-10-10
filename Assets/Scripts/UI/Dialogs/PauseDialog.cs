@@ -1,3 +1,4 @@
+using SilentSprint.Core;
 using SilentSprint.Gameplay;
 using UnityEngine;
 using UnityEngine.Events;
@@ -11,7 +12,7 @@ namespace SilentSprint.UI.Dialogs
     /// Hộp cheat dùng để đỡ phải đi nhặt đủ 20 mảnh đá: bấm "Item2 + 1" là cộng thẳng vào bộ đếm
     /// mảnh đá tự do, nên tới mốc 10 là la bàn vẫn rơi xuống như nhặt thật.
     ///
-    /// Nút "Item1 + 1" hiện chưa nối vì trong game chưa có hệ thống/bộ đếm Item1 nào.
+    /// "Item1 + 1" cộng thẳng vào bộ đếm vật phẩm cần tìm — thứ mà tượng thiên thần thưởng mỗi khi thắng mini game.
     /// </summary>
     public class PauseDialog : DialogView
     {
@@ -27,6 +28,9 @@ namespace SilentSprint.UI.Dialogs
         public Button btnAddItem1;
         public Button btnAddItem2;
 
+        [Tooltip("Số vật phẩm cần tìm cộng thêm mỗi lần bấm 'Item1 + 1'.")]
+        public int addItem1Amount = 1;
+
         [Tooltip("Số mảnh đá tự do cộng thêm mỗi lần bấm 'Item2 + 1'.")]
         public int addItem2Amount = 1;
 
@@ -34,8 +38,8 @@ namespace SilentSprint.UI.Dialogs
         {
             Bind(btnResume, Hide);
             Bind(btnClose, Hide);
-            Bind(btnSetting, () => Debug.Log("[PauseDialog] Nút Setting chưa được nối vào đâu."));
-            Bind(btnQuit, () => Debug.Log("[PauseDialog] Nút QUIT chưa được nối vào đâu."));
+            Bind(btnSetting, OpenSettings);
+            Bind(btnQuit, QuitToMainMenu);
 
             Bind(btnCheat, ToggleCheatBox);
             Bind(btnAddItem1, AddItem1);
@@ -50,6 +54,31 @@ namespace SilentSprint.UI.Dialogs
 
             button.onClick.RemoveAllListeners();
             button.onClick.AddListener(action);
+        }
+
+        /// <summary>Mở bảng cài đặt (prefab DlgSetting) — trong đó có hai ô tick bật/tắt nhạc và tiếng hiệu ứng.</summary>
+        private void OpenSettings()
+        {
+            if (DialogManager.Instance == null)
+            {
+                Debug.LogWarning("[PauseDialog] Chưa có DialogManager nên không mở được bảng cài đặt.", this);
+                return;
+            }
+
+            DialogManager.Instance.Show<SettingDialog>();
+        }
+
+        /// <summary>
+        /// Thoát ra bảng chính. Đóng bảng trước để DialogManager trả timeScale lại cho game
+        /// (bảng đang mở thì game bị dừng), rồi mới đổi scene.
+        /// </summary>
+        private void QuitToMainMenu()
+        {
+            // Ra bảng chính thì lưu lại tiến trình đang chơi để nút Continue còn quay lại được.
+            if (GameplaySaveManager.Instance != null) GameplaySaveManager.Instance.SaveNow();
+
+            Hide();
+            SceneFlow.Load(SceneNames.MainMenu);
         }
 
         private void ToggleCheatBox()
@@ -70,7 +99,13 @@ namespace SilentSprint.UI.Dialogs
 
         private void AddItem1()
         {
-            Debug.LogWarning("[PauseDialog] Trong game chưa có hệ thống Item1 nào nên nút 'Item1 + 1' chưa làm gì.", this);
+            if (ItemManager.Instance == null)
+            {
+                Debug.LogWarning("[PauseDialog] Chưa có ItemManager nên không cộng được vật phẩm cần tìm.", this);
+                return;
+            }
+
+            ItemManager.Instance.CollectQuestItem(Mathf.Max(1, addItem1Amount));
         }
     }
 }

@@ -49,6 +49,11 @@ namespace SilentSprint.Gameplay
                  "Khi do file Assets/Resources/MonsterBrain/monster_brain.onnx se duoc nap tu dong.")]
         public MonsterBrain brain;
 
+        [Header("Leo thang theo tien do (manh da tu do)")]
+        [Tooltip("Quai khon dan theo so manh da tu do nguoi choi nhat duoc: xem MonsterEscalation. " +
+                 "Chi nang GIAC QUAN va Y DINH cua brain, khong dung toi toc do.")]
+        public MonsterEscalation escalation = new MonsterEscalation();
+
         [Header("Reflex Layer (luon thang quyet dinh cua brain)")]
         [Tooltip("Thay player trong khoang sightDistance * he so nay thi bat buoc chuyen sang Chase.")]
         [Range(0f, 1f)]
@@ -71,6 +76,12 @@ namespace SilentSprint.Gameplay
         [Header("Chase Behaviour")]
         [Tooltip("So giay du doan ve phia truoc theo van toc player khi brain yeu cau cat duong.")]
         public float flankPredictionTime = 1.2f;
+
+        [Tooltip("Toc do duoi bi kep khong vuot qua runSpeed cua nguoi choi nhan he so nay. " +
+                 "Phai nho hon 1: day la 'cua thoat' bat buoc, nguoi choi bam chay het toc la phai bo xa duoc quai. " +
+                 "Tran nay manh hon ca chaseSpeed lan moi bac leo thang.")]
+        [Range(0.5f, 1f)]
+        public float maxChaseSpeedToPlayerRunRatio = 0.85f;
 
         [Header("Patrol")]
         public float patrolWaitTime = 2f;
@@ -150,6 +161,7 @@ namespace SilentSprint.Gameplay
 
             if (player == null || hasCaughtPlayer) return;
 
+            RefreshEscalation();
             SyncPerceptionSettings();
             perception.Bind(playerController);
             perception.Sample(transform, brain != null ? brain.Decision.Alertness : 0.25f, Time.deltaTime);
@@ -246,12 +258,47 @@ namespace SilentSprint.Gameplay
 
         // ------------------------------------------------------------------ Giac quan
 
+        /// <summary>
+        /// Đọc lại số mảnh đá tự do và cập nhật bậc leo thang. Gọi trước
+        /// <see cref="SyncPerceptionSettings"/> để mọi chỉ số trong frame này đã theo bậc mới.
+        /// </summary>
+        private void RefreshEscalation()
+        {
+            int stones = ItemManager.Instance != null ? ItemManager.Instance.currentFreedomStones : 0;
+            int previousTier = escalation.Tier;
+            escalation.Refresh(stones);
+
+            if (escalation.Tier == previousTier || !logStateChanges) return;
+
+            Debug.Log(string.Format(
+                "[MonsterAI] Leo thang len bac {0} ({1}/{2} manh da): tam nhin x{3:F2}, tam nghe x{4:F2}, " +
+                "goc nhin +{5:F0} do, san y dinh {6:F2}, nguong doi trang thai {7:F2}.",
+                escalation.Tier, stones, ItemManager.Instance != null ? ItemManager.Instance.maxFreedomStones : 0,
+                escalation.SightMultiplier, escalation.HearingMultiplier, escalation.SightAngleBonus,
+                escalation.IntentFloor, ResolveStateSwitchMargin()), this);
+        }
+
+        /// <summary>
+        /// Kéo một tham số tính cách của brain lên sàn của bậc leo thang hiện tại. Brain trả về
+        /// thấp hơn sàn thì quái vẫn hành xử ráo riết như bậc đã yêu cầu.
+        /// </summary>
+        private float IntentFloor(float value)
+        {
+            return Mathf.Clamp01(escalation.ApplyIntentFloor(value));
+        }
+
+        /// <summary>Ngưỡng ưu tiên khi đổi trạng thái, đã trừ đi phần leo thang.</summary>
+        private float ResolveStateSwitchMargin()
+        {
+            return Mathf.Clamp(stateSwitchMargin + escalation.StateSwitchMarginOffset, 0f, 1f);
+        }
+
         private void SyncPerceptionSettings()
         {
-            perception.SightDistance = sightDistance;
-            perception.SightAngle = sightAngle;
+            perception.SightDistance = sightDistance * escalation.SightMultiplier;
+            perception.SightAngle = sightAngle + escalation.SightAngleBonus;
             perception.EyeHeight = eyeHeight;
-            perception.HearingDistance = hearingDistance;
+            perception.HearingDistance = hearingDistance * escalation.HearingMultiplier;
             perception.StalkRadius = stalkRadius;
             perception.ObstacleMask = obstacleMask;
         }
@@ -259,7 +306,7 @@ namespace SilentSprint.Gameplay
         private MonsterObservation BuildObservation()
         {
             float sight = Mathf.Max(0.001f, perception.EffectiveSightDistance);
-            float hear = Mathf.Max(0.001f, hearingDistance);
+            float hear = Mathf.Max(0.001f, perception.HearingDistance);
             float runReference = Mathf.Max(0.001f, perception.RunSpeedReference);
 
             var observation = new MonsterObservation();
@@ -293,14 +340,14 @@ namespace SilentSprint.Gameplay
             // --- LOP PHAN XA -----------------------------------------------------------------
             // Cac luat duoi day khong the bi model ghi de, va chay sau cung nen luon thang.
             bool veryClose = perception.DistanceToPlayer <= catchDistance * 3f;
-            bool pointBlank = perception.DistanceToPlayer <= sightDistance * pointBlankChaseFactor;
+            bool pointBlank = perception.DistanceToPlayer <= perception.SightDistance * pointBlankChaseFactor;
 
             if (perception.PlayerVisible && (veryClose || pointBlank))
             {
                 SetState(MonsterState.Chase);
             }
             else if (perception.PlayerHeard &&
-                     perception.DistanceToPlayer <= hearingDistance * closeAudibleRange &&
+                     perception.DistanceToPlayer <= perception.HearingDistance * closeAudibleRange &&
                      currentState == MonsterState.Patrol)
             {
                 SetState(MonsterState.Investigate);
@@ -345,10 +392,11 @@ namespace SilentSprint.Gameplay
             var bestState = (MonsterState)bestIndex;
 
             // Do tre doi trang thai: tranh rung lac khi hai lua chon xap xi nhau.
+            // Bac leo thang cang cao thi nguong nay cang thap, de quai phan ung som hon.
             if (bestState != currentState)
             {
                 float incumbent = ProbabilityForState(patrol, investigate, chase, currentState);
-                if (best < incumbent + stateSwitchMargin)
+                if (best < incumbent + ResolveStateSwitchMargin())
                     return currentState;
             }
 
@@ -382,7 +430,7 @@ namespace SilentSprint.Gameplay
                         ? perception.LastKnownPosition
                         : player.position;
                     searchTimer = Mathf.Lerp(searchDurationMin, searchDurationMax,
-                        Mathf.Clamp01(brain != null ? brain.Decision.Alertness : 0.25f));
+                        brain != null ? IntentFloor(brain.Decision.Alertness) : 0.25f);
                     SearchFromHere();
                     break;
 
@@ -399,7 +447,7 @@ namespace SilentSprint.Gameplay
 
         private void PatrolBehavior()
         {
-            float aggression = brain != null ? Mathf.Clamp01(brain.Decision.Aggression) : 0.2f;
+            float aggression = brain != null ? IntentFloor(brain.Decision.Aggression) : 0.2f;
             agent.isStopped = false;
             agent.speed = Mathf.Lerp(patrolSpeed * 0.8f, patrolSpeed, aggression);
 
@@ -427,7 +475,7 @@ namespace SilentSprint.Gameplay
 
         private void InvestigateBehavior()
         {
-            float aggression = brain != null ? Mathf.Clamp01(brain.Decision.Aggression) : 0.2f;
+            float aggression = brain != null ? IntentFloor(brain.Decision.Aggression) : 0.2f;
             agent.isStopped = false;
             agent.speed = Mathf.Lerp(patrolSpeed * 0.85f, patrolSpeed * 1.35f, aggression);
 
@@ -461,7 +509,7 @@ namespace SilentSprint.Gameplay
                 waitTimer += Time.deltaTime;
                 if (waitTimer >= 1f)
                 {
-                    float radius = Mathf.Max(2f, brain.Decision.SearchRadius * maxSearchRadius);
+                    float radius = Mathf.Max(2f, IntentFloor(brain.Decision.SearchRadius) * maxSearchRadius);
                     Vector3 candidate = investigateTarget + Random.insideUnitSphere * radius;
                     candidate.y = investigateTarget.y;
 
@@ -475,11 +523,11 @@ namespace SilentSprint.Gameplay
 
         private void ChaseBehavior()
         {
-            float aggression = brain != null ? Mathf.Clamp01(brain.Decision.Aggression) : 1f;
-            float flank = brain != null ? Mathf.Clamp01(brain.Decision.Flank) : 0f;
+            float aggression = brain != null ? IntentFloor(brain.Decision.Aggression) : 1f;
+            float flank = brain != null ? IntentFloor(brain.Decision.Flank) : 0f;
 
             agent.isStopped = false;
-            agent.speed = Mathf.Lerp(patrolSpeed, chaseSpeed, aggression);
+            agent.speed = MaxChaseSpeed(aggression);
 
             Vector3 destination = player.position;
 
@@ -497,6 +545,30 @@ namespace SilentSprint.Gameplay
             {
                 CatchPlayer();
             }
+        }
+
+        /// <summary>
+        /// Tốc độ khi đuổi, đã kẹp theo tốc độ chạy của người chơi.
+        ///
+        /// Vì sao phải kẹp: <see cref="chaseSpeed"/> một mình có thể lớn hơn <c>runSpeed</c> của
+        /// <see cref="PlayerController"/>, và khi đó người chơi có bị phát hiện là hết đường —
+        /// có chạy hết tốc cũng chỉ chậm hơn mà thôi. Trần này bảo đảm người chơi luôn bỏ xa được quái,
+        /// nên muốn thoát thì phải chạy (tốn thể lực) rồi cắt tầm nhìn, chứ không phải đứng yên chịu trận.
+        /// Trần được tính lại mỗi frame nên đổi <c>runSpeed</c> lúc chạy cũng ăn ngay.
+        /// </summary>
+        /// <param name="aggression">Ý định hung hăng 0..1 của brain, đã qua <see cref="IntentFloor"/>.</param>
+        private float MaxChaseSpeed(float aggression)
+        {
+            float playerRunSpeed = playerController != null
+                ? playerController.runSpeed
+                : perception.RunSpeedReference;
+
+            float wanted = Mathf.Lerp(patrolSpeed, chaseSpeed, aggression);
+            if (playerRunSpeed <= 0f) return wanted;
+
+            // Kep he so <= 1 lan nua de du prefab/asset con giu gia tri cu thi 'cua thoat' van con.
+            float ratio = Mathf.Clamp(maxChaseSpeedToPlayerRunRatio, 0.1f, 1f);
+            return Mathf.Min(wanted, playerRunSpeed * ratio);
         }
 
         private void CatchPlayer()
@@ -549,19 +621,24 @@ namespace SilentSprint.Gameplay
 
         private void OnDrawGizmosSelected()
         {
+            // Vẽ theo chỉ số ĐÃ leo thang để nhìn là biết quái đang ở bậc nào.
+            float effectiveSight = sightDistance * escalation.SightMultiplier;
+            float effectiveAngle = sightAngle + escalation.SightAngleBonus;
+            float effectiveHearing = hearingDistance * escalation.HearingMultiplier;
+
             Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(transform.position, sightDistance);
+            Gizmos.DrawWireSphere(transform.position, effectiveSight);
 
             Vector3 eyePosition = transform.position + Vector3.up * eyeHeight;
-            Vector3 leftBoundary = Quaternion.Euler(0, -sightAngle, 0) * transform.forward;
-            Vector3 rightBoundary = Quaternion.Euler(0, sightAngle, 0) * transform.forward;
+            Vector3 leftBoundary = Quaternion.Euler(0, -effectiveAngle, 0) * transform.forward;
+            Vector3 rightBoundary = Quaternion.Euler(0, effectiveAngle, 0) * transform.forward;
 
             Gizmos.color = Color.blue;
-            Gizmos.DrawRay(eyePosition, leftBoundary * sightDistance);
-            Gizmos.DrawRay(eyePosition, rightBoundary * sightDistance);
+            Gizmos.DrawRay(eyePosition, leftBoundary * effectiveSight);
+            Gizmos.DrawRay(eyePosition, rightBoundary * effectiveSight);
 
             Gizmos.color = new Color(1f, 0.5f, 0f, 0.35f);
-            Gizmos.DrawWireSphere(transform.position, hearingDistance);
+            Gizmos.DrawWireSphere(transform.position, effectiveHearing);
 
             if (player != null)
             {
@@ -583,7 +660,7 @@ namespace SilentSprint.Gameplay
             {
                 Gizmos.color = new Color(1f, 1f, 0f, 0.25f);
                 float radius = brain != null
-                    ? Mathf.Max(2f, brain.Decision.SearchRadius * maxSearchRadius)
+                    ? Mathf.Max(2f, IntentFloor(brain.Decision.SearchRadius) * maxSearchRadius)
                     : maxSearchRadius;
                 Gizmos.DrawWireSphere(investigateTarget, radius);
             }

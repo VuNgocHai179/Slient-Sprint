@@ -2111,6 +2111,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1348576056}
   - component: {fileID: 1348576055}
+  - component: {fileID: 1990000003}
   m_Layer: 0
   m_Name: Timeline_Encounter
   m_TagString: Untagged
@@ -2170,6 +2171,29 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1990000003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1348576054}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: beea7d6ff22e415bb45ed24ef93a337d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  director: {fileID: 1348576055}
+  nextScene: Gameplay
+  autoAdvanceOnEnd: 1
+  delayAfterEnd: 0.25
+  showSkipButton: 1
+  skipButton: {fileID: 0}
+  skipLabel: Skip
+  skipButtonWidth: 220
+  skipButtonHeight: 96
+  skipFontSize: 40
+  skipMargin: 24
 --- !u!1 &1382693646 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 287602410570073824, guid: 58b7bf974a2fe0c4b833cdf8a7ec487f, type: 3}

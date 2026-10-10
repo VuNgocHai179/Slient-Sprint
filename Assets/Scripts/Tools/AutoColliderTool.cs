@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿#if UNITY_EDITOR
+using UnityEngine;
 using UnityEditor;
 
 namespace SilentSprint.Tools
@@ -43,3 +44,4 @@ namespace SilentSprint.Tools
         }
     }
 }
+#endif

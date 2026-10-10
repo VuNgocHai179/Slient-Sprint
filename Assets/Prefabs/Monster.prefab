@@ -94,7 +94,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   currentState: 0
   patrolSpeed: 3.5
-  chaseSpeed: 9
+  chaseSpeed: 6.5
   stalkRadius: 25
   player: {fileID: 0}
   sightDistance: 20

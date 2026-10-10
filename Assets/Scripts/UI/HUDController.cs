@@ -28,6 +28,9 @@ namespace SilentSprint.UI
         [Header("Item Counter UI")]
         public TextMeshProUGUI txtFreedomStone;
 
+        [Tooltip("Bộ đếm vật phẩm cần tìm (Item1) trên MainHUD, dạng 'đã có/tổng'. Mỗi tượng thiên thần thưởng một vật phẩm.")]
+        public TextMeshProUGUI txtQuestItem;
+
         private PlayerController player;
 
         void Start()
@@ -43,17 +46,20 @@ namespace SilentSprint.UI
             if (ItemManager.Instance != null)
             {
                 UpdateFreedomStoneDisplay(ItemManager.Instance.currentFreedomStones, ItemManager.Instance.maxFreedomStones);
+                UpdateQuestItemDisplay(ItemManager.Instance.currentQuestItems, ItemManager.Instance.maxQuestItems);
             }
         }
 
         void OnEnable()
         {
             ItemManager.OnFreedomStoneChanged += UpdateFreedomStoneDisplay;
+            ItemManager.OnQuestItemChanged += UpdateQuestItemDisplay;
         }
 
         void OnDisable()
         {
             ItemManager.OnFreedomStoneChanged -= UpdateFreedomStoneDisplay;
+            ItemManager.OnQuestItemChanged -= UpdateQuestItemDisplay;
         }
 
         public void UpdateFreedomStoneDisplay(int current, int max)
@@ -61,6 +67,14 @@ namespace SilentSprint.UI
             if (txtFreedomStone != null)
             {
                 txtFreedomStone.text = $"{current}/{max}";
+            }
+        }
+
+        public void UpdateQuestItemDisplay(int current, int max)
+        {
+            if (txtQuestItem != null)
+            {
+                txtQuestItem.text = $"{current}/{max}";
             }
         }
 

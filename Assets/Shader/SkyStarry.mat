@@ -22,12 +22,27 @@ Material:
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
-    m_TexEnvs: []
+    m_TexEnvs:
+    - _MoonTex:
+        m_Texture: {fileID: 2800000, guid: e71fddb8a8fcae94c81138c4203bca04, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _MoonAzimuth: 200
+    - _MoonBrightness: 1.2
+    - _MoonElevation: 40
+    - _MoonGlow: 0.35
+    - _MoonGlowSize: 3
+    - _MoonSize: 6
+    - _MoonSoftness: 0.4
+    - _MoonTexCenterX: 0.46
+    - _MoonTexCenterY: 0.5
     - _StarDensity: 300
     - _TwinkleSpeed: 1
     m_Colors:
+    - _MoonColor: {r: 1, g: 0.97, b: 0.9, a: 1}
+    - _MoonGlowColor: {r: 0.55, g: 0.7, b: 1, a: 1}
     - _SkyColor: {r: 0.02, g: 0.02, b: 0.059999965, a: 1}
     - _StarColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

@@ -16,6 +16,9 @@ namespace SilentSprint.Gameplay
     /// </summary>
     public class MinigamePedestal : MonoBehaviour
     {
+        /// <summary>Tên object của tượng thiên thần trong scene, dùng để tự tìm khi chưa gán angelAnchor.</summary>
+        private const string AngelNamePrefix = "FallenAngel";
+
         [Header("Nhiệm vụ")]
         [Tooltip("Mini game mà StonePedestal này phụ trách.")]
         public MinigameKind minigameKind = MinigameKind.Cup;
@@ -23,6 +26,26 @@ namespace SilentSprint.Gameplay
         [Header("Vùng kích hoạt")]
         [Tooltip("Bán kính (world unit) tính từ tâm pedestal. Người chơi vào vùng này sẽ hiện popup.")]
         public float interactRadius = 12f;
+
+        [Header("Tượng thiên thần")]
+        [Tooltip("Tượng thiên thần sa ngã của pedestal này — nơi nhả vật phẩm thưởng khi người chơi thắng. " +
+                 "Để trống sẽ tự tìm object con có tên bắt đầu bằng 'FallenAngel'.")]
+        public Transform angelAnchor;
+
+        private Transform cachedAngel;
+
+        /// <summary>
+        /// Tượng thiên thần của pedestal, dùng làm chỗ sinh ra vật phẩm thưởng. Null nếu không tìm thấy.
+        /// </summary>
+        public Transform AngelAnchor
+        {
+            get
+            {
+                if (angelAnchor != null) return angelAnchor;
+                if (cachedAngel == null) cachedAngel = FindAngelChild();
+                return cachedAngel;
+            }
+        }
 
         [Header("Trạng thái")]
         [SerializeField] private bool isCompleted = false;
@@ -41,6 +64,24 @@ namespace SilentSprint.Gameplay
         public void MarkCompleted()
         {
             isCompleted = true;
+        }
+
+        /// <summary>
+        /// Tìm tượng thiên thần trong các object con. Tượng được thả tay vào từng pedestal trong scene
+        /// (không nằm trong prefab) nên tên là thứ duy nhất nhận ra được chúng; muốn chắc thì gán thẳng vào angelAnchor.
+        /// </summary>
+        private Transform FindAngelChild()
+        {
+            foreach (Transform child in GetComponentsInChildren<Transform>(true))
+            {
+                if (child == transform) continue;
+                if (child.name.StartsWith(AngelNamePrefix, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return child;
+                }
+            }
+
+            return null;
         }
 
 #if UNITY_EDITOR

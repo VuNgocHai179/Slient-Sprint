@@ -57,6 +57,31 @@ namespace SilentSprint.Gameplay
             };
         }
 
+        /// <summary>
+        /// Lời nhắc ở cổng khi người chơi chưa gom đủ đồ. Cổng chỉ chịu mở khi có đủ vật phẩm của các
+        /// tượng thiên thần và đủ mảnh đá tự do (xem <see cref="SilentSprint.Gameplay.KamehamehaEnding"/>).
+        ///
+        /// Chỉ nhắc phần còn thiếu: người chơi đứng ở cổng là biết ngay còn phải đi tìm gì, thay vì phải
+        /// tự đoán vì sao cổng không chịu mở.
+        /// </summary>
+        /// <param name="missingItems">Còn thiếu bao nhiêu vật phẩm từ tượng thiên thần.</param>
+        /// <param name="missingStones">Còn thiếu bao nhiêu mảnh đá tự do.</param>
+        public static IList<DialogueLine> GateLocked(int missingItems, int missingStones)
+        {
+            var missing = new List<string>();
+
+            if (missingItems > 0) missing.Add($"{missingItems} {HighlightItem("vật phẩm")}");
+            if (missingStones > 0) missing.Add($"{missingStones} {HighlightItem("mảnh đá tự do")}");
+
+            // Không thiếu gì mà vẫn bị gọi (điều kiện đòi hỏi khác) thì nói chung chung.
+            if (missing.Count == 0) missing.Add(HighlightItem("vật phẩm và mảnh đá tự do"));
+
+            return new List<DialogueLine>
+            {
+                new DialogueLine(Narrator, $"Cánh cổng này còn bị phong ấn. Ngươi còn thiếu {string.Join(" và ", missing)} nữa.")
+            };
+        }
+
         /// <summary>Cuộc nói chuyện ở một tượng đá: dẫn dắt, dạy cách chơi, rồi hỏi vào chơi.</summary>
         public static IList<DialogueLine> PedestalConversation(MinigameKind kind)
         {

@@ -14,6 +14,10 @@ namespace SilentSprint.Gameplay.Minigames2
         public RuneButtonItem[] buttons;
         public Camera roomCamera;
 
+        [Header("Cheat")]
+        [Tooltip("Nút cheat trong phòng (object btn_cheat): bấm là thắng ngay ván này. Để trống sẽ tự tìm theo tên.")]
+        public Button btnCheat;
+
         [Header("Screen UI")]
         public CanvasGroup bgCanvasGroup;
         public GameObject setGamePanel;
@@ -34,6 +38,7 @@ namespace SilentSprint.Gameplay.Minigames2
         private List<int> targetSequence = new List<int>();
         private int currentInputIndex = 0;
         private bool canInteract = false;
+        private bool isFinished = false;
         private bool isInitialized = false;
 
         void Awake()
@@ -69,6 +74,8 @@ namespace SilentSprint.Gameplay.Minigames2
                 setGamePanel.SetActive(false);
             }
 
+            MinigameCheatButton.Bind(this, btnCheat, ForceWin);
+
             isInitialized = true;
         }
 
@@ -82,6 +89,7 @@ namespace SilentSprint.Gameplay.Minigames2
             }
 
             currentRound = 1;
+            isFinished = false;
             StartCoroutine(PlayRoundRoutine());
         }
 
@@ -247,16 +255,36 @@ namespace SilentSprint.Gameplay.Minigames2
             }
             else
             {
-                if (roomCamera != null) roomCamera.gameObject.SetActive(false);
-                OnGameWon?.Invoke();
+                FinishGame(won: true);
             }
         }
 
         private IEnumerator HandleLoseRoutine()
         {
             yield return new WaitForSeconds(0.3f);
+            FinishGame(won: false);
+        }
+
+        /// <summary>
+        /// Kết thúc ván: ẩn camera phòng rồi bắn sự kiện thắng/thua. Mọi đường ra khỏi ván đều đi qua đây
+        /// (thắng thật, thua, và nút cheat) nên mỗi ván chỉ kết thúc được một lần.
+        /// </summary>
+        private void FinishGame(bool won)
+        {
+            if (isFinished) return;
+            isFinished = true;
+            canInteract = false;
+
             if (roomCamera != null) roomCamera.gameObject.SetActive(false);
-            OnGameLost?.Invoke();
+
+            if (won) OnGameWon?.Invoke();
+            else OnGameLost?.Invoke();
+        }
+
+        /// <summary>Nút cheat trong phòng: thắng ngay ván này, đi đúng đường thắng thật.</summary>
+        public void ForceWin()
+        {
+            FinishGame(won: true);
         }
 
         public void DisposeTweens()

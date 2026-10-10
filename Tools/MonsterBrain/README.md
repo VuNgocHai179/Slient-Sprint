@@ -153,6 +153,13 @@ Trên `MonsterAI` có thêm nhóm **Reflex Layer**:
 | `closeAudibleRange` | `0.5` | nghe tiếng động trong `hearingDistance × hệ số này` → ít nhất Investigate |
 | `stateSwitchMargin` | `0.15` | biên độ ưu tiên khi đổi trạng thái, chống rung lắc |
 
+Và nhóm **Chase Behaviour**:
+
+| Trường | Mặc định | Ghi chú |
+|---|---|---|
+| `flankPredictionTime` | `1.2` | giây dự đoán về phía trước theo vận tốc player khi cắt đường |
+| `maxChaseSpeedToPlayerRunRatio` | `0.85` | **trần tốc độ đuổi** = `PlayerController.runSpeed × hệ số này`; xem mục 6 |
+
 `MonsterAI` tự tìm `MonsterBrain` trên cùng GameObject, và tự thêm vào nếu chưa có — nên prefab
 `Monster` hiện tại chạy được ngay mà không cần sửa gì. Thêm component vào prefab để cấu hình được
 trong Inspector.
@@ -165,7 +172,43 @@ trong Inspector.
 > = chỉ layer Player). `MonsterPerception` có bỏ qua collider của chính quái và của player khi kiểm
 > tra, nhưng mask vẫn phải chứa layer môi trường thì tường mới chặn được tầm nhìn.
 
-## 6. Ghi chú
+## 6. Quái khôn dần theo tiến độ + cửa thoát của người chơi
+
+Hai thứ này đi cùng nhau và nằm ở hai chỗ khác nhau, cố tình không trộn vào model:
+
+**a) Leo thang — `MonsterEscalation` (gắn trong `MonsterAI.escalation`).**
+Mỗi mốc mảnh đá tự do (`ItemManager.currentFreedomStones`) là một bậc; bậc chỉ nâng **giác quan** và
+**ý định**, không đụng tốc độ:
+
+| Bậc | Số đá | Tầm nhìn | Tầm nghe | Góc nhìn | Sàn ý định | Ngưỡng đổi trạng thái |
+|-----|-------|----------|----------|----------|------------|-----------------------|
+| 0 | 0–9 | 20,0 m | 25,0 m | ±45° | 0,00 | 0,15 |
+| 1 | 10–14 | 22,0 m | 27,5 m | ±50° | 0,20 | 0,11 |
+| 2 | 15–19 | 24,0 m | 30,0 m | ±55° | 0,40 | 0,07 |
+| 3 | 20 | 26,0 m | 32,5 m | ±60° | 0,60 | 0,03 |
+
+- **Sàn ý định** kéo 4 tham số tính cách của brain (aggression, searchRadius, flank, alertness) lên
+  tối thiểu bằng sàn của bậc. Model có trả về thấp thì quái vẫn ráo riết như bậc yêu cầu.
+- **Ngưỡng đổi trạng thái** hạ dần nên quái bớt "do dự" khi đã có thông tin.
+- Cấu hình: `firstTierAtStones` (10), `stonesPerTier` (5), `maxTier` (3) và 5 hệ số mỗi bậc, tất cả
+  nằm trong Inspector. `enabled = false` là quái giữ nguyên chỉ số gốc cả ván.
+- Muốn đổi bậc thì **không phải train lại model**: đây là lớp phản xạ ngoài model.
+
+**b) Cửa thoát — `maxChaseSpeedToPlayerRunRatio` (trên `MonsterAI`).**
+Trước đây `chaseSpeed = 9` còn `PlayerController.runSpeed = 8`, cộng thêm cắt đường nên hễ lọt tầm
+nhìn là hết đường chạy. Nay tốc độ đuổi bị kẹp:
+
+```
+agent.speed = min( Lerp(patrolSpeed, chaseSpeed, aggression), runSpeed_của_player × hệ_số )
+```
+
+- Mặc định `chaseSpeed = 6.5`, hệ số `0.85` → trần `6.8 < 8`. Trần luôn thắng `chaseSpeed` và luôn
+  thắng cả bậc leo thang — người chơi bấm chạy là phải bỏ xa được.
+- Hệ số còn bị kẹp `≤ 1` ngay trong code, nên prefab cũ giữ giá trị lớn cũng không phá được cửa thoát.
+- Chạy tốn thể lực (`maxStamina` 100, `drainRate` 25 ⇒ 4 giây), nên thoát được vẫn phải là: chạy cắt
+  tầm nhìn rồi đi bộ (đi bộ có `playerNoise = 0.4`, không vượt `NoiseThreshold = 0.4` nên im lặng).
+
+## 7. Ghi chú
 
 - Model hiện tại là **behaviour cloning**: nó bắt chước chính sách viết tay ở trên, chứ chưa tự
   học ra chiến thuật mới. Nó "thông minh hơn" ở chỗ liên tục hoá được nhiều tín hiệu cùng lúc
