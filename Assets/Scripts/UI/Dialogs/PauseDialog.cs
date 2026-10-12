@@ -10,7 +10,7 @@ namespace SilentSprint.UI.Dialogs
     /// Bảng tạm dừng (prefab DlgPause): Resume/Close để chơi tiếp, Cheat để mở hộp cheat.
     ///
     /// Hộp cheat dùng để đỡ phải đi nhặt đủ 20 mảnh đá: bấm "Item2 + 1" là cộng thẳng vào bộ đếm
-    /// mảnh đá tự do, nên tới mốc 10 là la bàn vẫn rơi xuống như nhặt thật.
+    /// mảnh đá tự do, nên tới mốc nhận la bàn (<see cref="CompassSystem.unlockAtCount"/>) là la bàn vẫn rơi xuống như nhặt thật.
     ///
     /// "Item1 + 1" cộng thẳng vào bộ đếm vật phẩm cần tìm — thứ mà tượng thiên thần thưởng mỗi khi thắng mini game.
     /// </summary>

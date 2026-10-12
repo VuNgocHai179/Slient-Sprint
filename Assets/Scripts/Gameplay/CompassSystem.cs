@@ -20,7 +20,7 @@ namespace SilentSprint.Gameplay
     {
         [Header("Mốc nhận la bàn")]
         [Tooltip("Số mảnh đá tự do phải nhặt để người bí ẩn thả la bàn xuống.")]
-        public int unlockAtCount = 10;
+        public int unlockAtCount = 5;
 
         [Header("La bàn")]
         [Tooltip("Prefab la bàn, sinh ra khi người chơi nhặt đủ mảnh đá. Phải có component GuidingCompass.")]
